@@ -209,7 +209,7 @@ the archives attached. Release platforms:
 
 - Linux amd64 and arm64 (arm64 covers 64-bit Raspberry Pi OS on the Pi 3B and
   later; the purego GUI has no 32-bit ARM support)
-- macOS amd64
+- macOS amd64 (Intel) and arm64 (Apple Silicon)
 - Windows amd64
 
 Dependencies are ordinary published modules fetched from the Go proxy at build

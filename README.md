@@ -5,6 +5,8 @@ pixel grid, paint per-character-cell Spectrum colour attributes, and preview the
 animation. Sprites can be any size up to a full screen (32×24 character cells,
 256×192 px) and carry between 1 and 16 frames.
 
+![zenimate](zenimate.png)
+
 There are two frontends over one shared, UI-agnostic core:
 
 - **`zenimate-tui`** — a terminal editor. Ordinary UTF-8 text for labels; the
