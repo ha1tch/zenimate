@@ -1,0 +1,7 @@
+# Build artifacts
+/dist/
+zenimate-tui
+zenimate-gui
+
+# OS noise
+.DS_Store

@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Raspberry Pi 3B runs 64-bit Raspberry Pi OS (linux/arm64); the purego
+          # GUI has no 32-bit ARM support, so arm64 is the only viable Pi target.
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set VERSION from tag and sync into pkg/version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # VERSION is the single source of truth; write the tag's version into it,
+          # then run the project's own sync script (never edit pkg/version by hand).
+          printf '%s' "$VERSION" > VERSION
+          bash scripts/syncver.sh
+
+      - name: Build all three frontends
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          out="dist/zenimate-${GOOS}-${GOARCH}"
+          mkdir -p "$out"
+          # TUI and zaniplay are plain Go; the GUI is cgo-free via the purego tag.
+          go build -o "${out}/zenimate-tui${ext}"  ./cmd/zenimate-tui/
+          go build -o "${out}/zaniplay${ext}"      ./cmd/zaniplay/
+          CGO_ENABLED=0 go build -tags purego -o "${out}/zenimate-gui${ext}" ./cmd/zenimate-gui/
+          cp README.md CHANGELOG.md LICENSE "$out"/ 2>/dev/null || true
+
+      - name: Archive (zip for Windows, tar.gz otherwise)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          base="zenimate-${VERSION}-${GOOS}-${GOARCH}"
+          cd dist
+          if [ "$GOOS" = "windows" ]; then
+            zip -q -r "${base}.zip" "zenimate-${GOOS}-${GOARCH}"
+            echo "asset=dist/${base}.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "${base}.tar.gz" "zenimate-${GOOS}-${GOARCH}"
+            echo "asset=dist/${base}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenimate-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ env.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

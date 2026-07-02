@@ -1,0 +1,62 @@
+sinclair.bdf
+ZX Spectrum 48K character set
+
+This BDF face contains the 8x8 glyph shapes of the Sinclair ZX Spectrum 48K
+character set (codes 32-127). It is bundled from the ha1tch/bdf-fonts catalogue:
+https://github.com/ha1tch/bdf-fonts
+
+In that catalogue, sinclair.bdf is the reproducible result of extracting the
+character set from a ZX Spectrum 48K ROM. The same supporting files are bundled
+here in the sinclair/ subdirectory:
+
+  sinclair/zx48.rom      the ZX Spectrum 48K ROM the font was extracted from
+  sinclair/sinclair.go   the extraction program (the author's own work, placed
+                         in the public domain)
+  sinclair/SINCLAIR.txt  the copyright/permission statement (reproduced below)
+  sinclair/amstrad.txt   Amstrad's permission, as issued on the company's
+                         behalf by Cliff Lawson
+
+The glyph data in sinclair.bdf is byte-identical to the catalogue's, and is
+reproducible from the bundled ROM via the bundled extraction program.
+
+The ZX Spectrum ROM is copyright Amstrad. The following statement is reproduced
+from sinclair/SINCLAIR.txt; its condition 6 requires this acknowledgement to
+accompany any redistribution, which is why it is included here in full.
+
+----------------------------------------------------------------------------
+          ZX Spectrum ROM Copyright Notice and Permission Statement
+----------------------------------------------------------------------------
+The ROM images from the Sinclair ZX Spectrum (48K/128K and +2/+2A/+3 models) 
+are copyrighted works.
+Copyright © Amstrad Consumer Electronics plc.
+
+Amstrad have kindly given their permission for the redistribution of their 
+copyrighted material but retain that copyright.
+
+You are permitted to use and redistribute the Spectrum ROM images provided 
+in this package under the following conditions:
+
+1. Any embedded copyright messages within the ROM images must not be altered.
+
+2. The ROM images themselves must be made freely available - no one should 
+   charge for the ROM code.
+
+3. You may charge for emulator software that uses these ROMs, provided you 
+   are not charging for the parts of the code that are copyrighted by 
+   Amstrad and Sinclair.
+
+4. You may modify the ROM behavior as needed for emulation purposes.
+
+5. You may distribute modified versions of the ROMs, provided the copyright 
+   messages remain unaltered.
+
+6. This acknowledgement must be included with any redistribution of the ROM 
+   images.
+
+Note: This permission applies specifically to Spectrum 48K/128K and 
++2/+2A/+3 ROM images. It does not cover ZX80, ZX81, or Interface 1/2 ROMs.
+
+------------------------------------------------------------------------------
+  This permission is based on the statement by Cliff Lawson of Amstrad plc:
+https://groups.google.com/g/comp.sys.amstrad.8bit/c/HtpBU2Bzv_U/m/HhNDSU3MksAJ
+------------------------------------------------------------------------------
