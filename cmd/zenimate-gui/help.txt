@@ -1,0 +1,179 @@
+# ZENIMATE
+
+A painting and animation tool for ZX Spectrum sprites, with a
+graphical editor and a matching terminal editor over a shared core.
+
+
+## Painting
+
+  Left-click / drag    set pixels (draw)
+  Right-click / drag   clear pixels (erase)
+  Ctrl + paint         stamp the current ink/paper/bright onto a
+                       cell (plain painting edits only the bitmap)
+
+In Spectrum Colour mode the palette swatches choose the drawing
+colours: left-click a swatch to set the ink, right-click to set
+the paper.
+
+The editor keeps two planes: the bitmap (which pixels are on) and
+the per-cell attributes (ink, paper and bright). Painting pixels
+never changes colour; changing colour never changes pixels.
+
+
+## View modes
+
+  Bitmap Black       set pixels black over a transparency chequer
+  Bitmap White       set pixels white over a transparency chequer
+  Spectrum Colour    real ZX attributes: each pixel in its cell's
+                     ink or paper colour, at the cell's brightness
+
+Switch modes with the mode buttons. The bitmap modes are for
+shaping the artwork; Spectrum Colour shows how it will really
+look on a Spectrum.
+
+
+## Frames and animation
+
+  + / -            add / remove a frame
+  frame buttons    select a frame
+  Play / Stop      run the animation
+  Copy / paste     duplicate a frame's contents
+
+Onion-skinning shows neighbouring frames faintly behind the
+current one to help line up movement.
+
+
+## Sizing
+
+  W -8 / W +8     shrink / grow width by one character cell (8px)
+  H -8 / H +8     shrink / grow height by one character cell
+  Full Screen     size to the full Spectrum screen
+  Reset           clear all frames
+
+
+## File operations
+
+  Ctrl+O          open a sprite, animation, screen, image, bundle
+  Ctrl+S          save (writes back to the current source)
+  Ctrl+Shift+S    save as (always prompts for a destination)
+  Ctrl+E          export the current frame to a Spectrum format
+  Ctrl+Shift+E    add the sprite to a bundle
+  Ctrl+F          toggle the save-extension form (long vs 8.3)
+
+Files can also be dragged onto the window.
+
+
+## Scrolling this help
+
+  mouse wheel        scroll
+  up / down arrows   scroll a line
+  PgUp / PgDn        scroll a page
+  Home / End         jump to top / bottom
+  Esc, or close box  close this help
+
+
+# How zenimate works
+
+Zenimate edits sprites the way the ZX Spectrum itself draws them,
+so what you paint is what the machine can show.
+
+The Spectrum screen is a grid of 8x8 character cells. Each cell
+holds an 8x8 block of one-bit pixels (the bitmap) plus a single
+attribute byte that colours the whole cell. That byte selects one
+ink colour and one paper colour from a palette of eight, a bright
+flag that lightens both, and a flash flag. Because colour is
+per-cell, not per-pixel, two pixels in the same cell can never be
+different colours at once. This is the famous "attribute clash",
+and zenimate models it faithfully rather than hiding it.
+
+A zenimate sprite is a rectangle of whole cells, from 1x1 up to
+the full 32x24 screen, with one or more frames. Every frame keeps
+its own bitmap and its own attributes, so an animation can change
+both shape and colour from frame to frame.
+
+The two planes are edited independently on purpose. In the bitmap
+modes you shape the artwork in black and white over a transparency
+chequer, ignoring colour entirely. In Spectrum Colour mode you see
+the real attribute colours and paint ink, paper and bright per
+cell. Painting pixels never disturbs the colours you have chosen,
+and recolouring never disturbs the pixels.
+
+
+# File formats
+
+Zenimate reads and writes a small family of formats. Two are
+native to zenimate; the rest are standard Spectrum files it can
+import from or export to.
+
+
+## .zani - a single animation
+
+A .zani file holds one animated sprite: all of its frames, each
+with its bitmap and its per-cell attributes. On disk the bytes are
+the ZCUT format used across the wider toolchain, so a .zani is
+simply a named ZCUT stream; a raw .zcut file opens the same way.
+Because it always stores every frame, saving and reloading a .zani
+round-trips the whole animation with no loss.
+
+On systems limited to 8.3 filenames the extension is .zan.
+
+
+## .zbun - a bundle of animations
+
+A .zbun file is a bundle: a zip archive holding several .zani
+animations together with a manifest. The manifest records, for
+each entry, its name, frame count, dimensions and a human label.
+A bundle is the natural place to keep all the sprites of a game or
+a scene in one file.
+
+The Open dialog understands bundles: it browses into a .zbun as if
+it were a folder, previews each animation inside, and opens the
+one you pick. Saving a sprite that came from a bundle offers to
+write it back into that bundle in place, keeping its label.
+
+On systems limited to 8.3 filenames the extension is .zbu.
+
+
+## The save-extension form
+
+Whether zenimate writes long extensions (.zani, .zbun) or short
+8.3 ones (.zan, .zbu) is a single setting, toggled with Ctrl+F.
+Loading always accepts every form regardless of the setting, so
+files written on one system open on another.
+
+
+## Importing Spectrum images
+
+A screen dump (.scr) loads directly as a full 32x24 image. A
+loading screen can also be lifted out of a tape (.tap or .tzx) or
+a snapshot (.sna or .z80): zenimate finds the screen data inside
+the container and imports it.
+
+A modern raster image (JPEG, PNG or GIF) can be brought in too. It
+is reduced to a Spectrum screen using a fit you choose - stretch
+to fill, best-fit within the frame, or centre at original size -
+and then quantised to the Spectrum's cells and palette.
+
+
+## Exporting to Spectrum formats
+
+The current frame can be exported to the formats real Spectrum
+tools expect: a raw screen (.scr), a tape with or without a BASIC
+loader (.tap, .tzx), or a snapshot (.sna, .z80). Exported files
+carry a neutral embedded name, never any personal data.
+
+
+# Save and source
+
+Zenimate tracks where the current sprite came from, and Save uses
+that to do the least surprising thing.
+
+A sprite opened from a file is overwritten in place by Save. A
+sprite opened from a bundle prompts, once, whether to update it
+inside that bundle or to save it as a separate .zani; your choice
+is remembered for the rest of the session. A brand-new sprite has
+no source yet, so Save asks where to put it.
+
+Save As (Ctrl+Shift+S) always prompts, whatever the source, when
+you want to write somewhere new. The title block always shows the
+current source, so it is clear at a glance what Save will write to.

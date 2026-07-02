@@ -1,7 +1,9 @@
-# Build artifacts
+# Build artifacts (anchored so they only match built binaries at the repo root,
+# NOT the cmd/zenimate-tui and cmd/zenimate-gui source directories).
 /dist/
-zenimate-tui
-zenimate-gui
+/zenimate-tui
+/zenimate-gui
+/zaniplay
 
 # OS noise
 .DS_Store
