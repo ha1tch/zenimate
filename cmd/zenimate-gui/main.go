@@ -20,6 +20,7 @@ import (
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/version"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 	"github.com/ha1tch/zenimate/pkg/zxpalette"
 )
 
@@ -527,6 +528,9 @@ func main() {
 	var files fileOps       // modal file dialog (save/open/export)
 	var help *helpModal     // scrollable help reader, when open
 	var reset *resetConfirm // typed reset confirmation, when open
+	var frameMenu *zenui.Menu // frame-strip right-click context menu, when open
+	frameMenuFrame := 0        // which frame index frameMenu was opened for
+	drag := newFrameDrag()     // frame-strip drag-to-reorder state
 
 	// Track the sprite dimensions so a resize can trigger a zoom-to-fit animation.
 	lastW, lastH := c.Sprite.Width(), c.Sprite.Height()
@@ -719,12 +723,26 @@ func main() {
 			}
 		}
 
+		// The frame context menu, when open, captures all input.
+		frameMenuOpen := frameMenu != nil
+		if frameMenuOpen {
+			switch frameMenu.Update(fpInput()) {
+			case zenui.Accepted:
+				applyFrameMenuPick(c, frameMenu.Result(), frameMenuFrame)
+				frameMenu = nil
+				frameMenuOpen = false
+			case zenui.Cancelled:
+				frameMenu = nil
+				frameMenuOpen = false
+			}
+		}
+
 		// A modal file dialog, when open, captures all input: it runs first and the
 		// editor's own interaction is frozen for the frame (geometry below is still
 		// computed so the editor renders normally underneath the dialog).
-		modal := helpOpen || resetOpen || files.active()
-		if helpOpen || resetOpen {
-			// help/reset already updated above; suppress other interaction
+		modal := helpOpen || resetOpen || frameMenuOpen || files.active()
+		if helpOpen || resetOpen || frameMenuOpen {
+			// help/reset/frameMenu already updated above; suppress other interaction
 		} else if files.active() {
 			files.update(fpInput())
 		} else {
@@ -1001,6 +1019,7 @@ func main() {
 			for i := range l.frameRects {
 				if rectHit(l.frameRects[i], mx, my) {
 					c.SelectFrame(i)
+					drag.press(i, mx, my)
 				}
 			}
 			if rectHit(l.addFrameRect, mx, my) {
@@ -1036,6 +1055,44 @@ func main() {
 			}
 		}
 
+		// Right-click on a frame button opens its context menu (Insert/Duplicate/
+		// Copy/Paste/Insert-and-paste/Delete). The frame is selected here, before
+		// the menu opens — see applyFrameMenuPick's comment for why that matters.
+		if !modal && frameMenu == nil && rl.IsMouseButtonPressed(rl.MouseRightButton) {
+			for i := range l.frameRects {
+				if rectHit(l.frameRects[i], mx, my) {
+					c.SelectFrame(i)
+					fr := l.frameRects[i]
+					anchor := zenui.Rect{X: int(fr.X), Y: int(fr.Y), W: int(fr.Width), H: int(fr.Height)}
+					frameMenu = newFrameMenu(c, anchor)
+					frameMenuFrame = i
+					break
+				}
+			}
+		}
+
+		// Frame drag-to-reorder: advance the pulsate clock and promote to active
+		// past the movement threshold while held, then dispatch (or cancel) on
+		// release. The press itself was already recorded above, alongside the
+		// ordinary click-to-select, so a plain click still works unchanged.
+		if drag.source >= 0 {
+			if rl.IsMouseButtonDown(rl.MouseLeftButton) {
+				drag.update(rl.GetFrameTime(), mx, my)
+			}
+			if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+				if drag.active {
+					inBand := my >= l.frameStripY && my < l.frameStripY+frameBtnH
+					if inBand && drag.source < len(l.frameRects) {
+						gap := frameDropGap(l.frameRects, float32(mx))
+						c.MoveFrame(drag.source, dragGapToMoveTarget(drag.source, gap))
+					}
+				}
+				drag.reset()
+			} else if rl.IsKeyPressed(rl.KeyEscape) {
+				drag.reset()
+			}
+		}
+
 		// Keyboard shortcuts mirror the TUI where sensible.
 		if !modal {
 			handleKeys(c)
@@ -1061,6 +1118,12 @@ func main() {
 		}
 		if reset != nil {
 			reset.draw(txt, l.winW, l.winH)
+		}
+		if frameMenu != nil {
+			frameMenu.Draw(fpRenderer{txt: txt}, l.winW, l.winH, fpTheme())
+		}
+		if drag.active {
+			drawFrameDrag(txt, l, drag, mx, my)
 		}
 
 		rl.EndDrawing()

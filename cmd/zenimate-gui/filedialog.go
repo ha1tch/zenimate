@@ -2,43 +2,43 @@ package main
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
-// fpRenderer adapts the bdfText/raylib drawing surface to filepick.Renderer.
+// fpRenderer adapts the bdfText/raylib drawing surface to zenui.Renderer.
 type fpRenderer struct {
 	txt *bdfText
 }
 
-func fpColor(c filepick.Colour) rl.Color { return rl.NewColor(c.R, c.G, c.B, c.A) }
+func fpColor(c zenui.Colour) rl.Color { return rl.NewColor(c.R, c.G, c.B, c.A) }
 
-func (r fpRenderer) FillRect(rc filepick.Rect, c filepick.Colour) {
+func (r fpRenderer) FillRect(rc zenui.Rect, c zenui.Colour) {
 	rl.DrawRectangle(int32(rc.X), int32(rc.Y), int32(rc.W), int32(rc.H), fpColor(c))
 }
 
-func (r fpRenderer) StrokeRect(rc filepick.Rect, c filepick.Colour, thickness int) {
+func (r fpRenderer) StrokeRect(rc zenui.Rect, c zenui.Colour, thickness int) {
 	rl.DrawRectangleLinesEx(
 		rl.NewRectangle(float32(rc.X), float32(rc.Y), float32(rc.W), float32(rc.H)),
 		float32(thickness), fpColor(c))
 }
 
-func (r fpRenderer) DrawText(s string, x, y, scale int, c filepick.Colour) {
+func (r fpRenderer) DrawText(s string, x, y, scale int, c zenui.Colour) {
 	r.txt.Draw(s, x, y, scale, fpColor(c))
 }
 
 func (r fpRenderer) TextWidth(s string, scale int) int { return r.txt.Measure(s, scale) }
 func (r fpRenderer) LineHeight(scale int) int          { return r.txt.CellH() * scale }
 
-func (r fpRenderer) Clip(rc filepick.Rect) {
+func (r fpRenderer) Clip(rc zenui.Rect) {
 	rl.BeginScissorMode(int32(rc.X), int32(rc.Y), int32(rc.W), int32(rc.H))
 }
 func (r fpRenderer) ClipEnd() { rl.EndScissorMode() }
 
-// fpInput builds a filepick.Input from raylib's current input state. Printable
+// fpInput builds a zenui.Input from raylib's current input state. Printable
 // runes are drained from raylib's character queue; the logical keys the dialog
 // cares about are edge-triggered via IsKeyPressed.
-func fpInput() filepick.Input {
-	in := filepick.Input{
+func fpInput() zenui.Input {
+	in := zenui.Input{
 		MouseX:       int(rl.GetMouseX()),
 		MouseY:       int(rl.GetMouseY()),
 		MouseDown:    rl.IsMouseButtonDown(rl.MouseLeftButton),
@@ -54,17 +54,17 @@ func fpInput() filepick.Input {
 	}
 	keymap := []struct {
 		rlKey int32
-		k     filepick.Key
+		k     zenui.Key
 	}{
-		{rl.KeyEnter, filepick.KeyEnter},
-		{rl.KeyKpEnter, filepick.KeyEnter},
-		{rl.KeyEscape, filepick.KeyEscape},
-		{rl.KeyBackspace, filepick.KeyBackspace},
-		{rl.KeyUp, filepick.KeyUp},
-		{rl.KeyDown, filepick.KeyDown},
-		{rl.KeyPageUp, filepick.KeyPageUp},
-		{rl.KeyPageDown, filepick.KeyPageDown},
-		{rl.KeyTab, filepick.KeyTab},
+		{rl.KeyEnter, zenui.KeyEnter},
+		{rl.KeyKpEnter, zenui.KeyEnter},
+		{rl.KeyEscape, zenui.KeyEscape},
+		{rl.KeyBackspace, zenui.KeyBackspace},
+		{rl.KeyUp, zenui.KeyUp},
+		{rl.KeyDown, zenui.KeyDown},
+		{rl.KeyPageUp, zenui.KeyPageUp},
+		{rl.KeyPageDown, zenui.KeyPageDown},
+		{rl.KeyTab, zenui.KeyTab},
 	}
 	for _, m := range keymap {
 		if rl.IsKeyPressed(m.rlKey) {
@@ -76,9 +76,9 @@ func fpInput() filepick.Input {
 
 // fpTheme maps the editor's palette onto the dialog theme so the dialog matches
 // zenimate's look.
-func fpTheme() filepick.Theme {
-	cv := func(c rl.Color) filepick.Colour { return filepick.Colour{R: c.R, G: c.G, B: c.B, A: c.A} }
-	t := filepick.DefaultTheme()
+func fpTheme() zenui.Theme {
+	cv := func(c rl.Color) zenui.Colour { return zenui.Colour{R: c.R, G: c.G, B: c.B, A: c.A} }
+	t := zenui.DefaultTheme()
 	t.Panel = cv(colBtn)
 	t.Sidebar = cv(colBG)
 	t.SideText = cv(colText)

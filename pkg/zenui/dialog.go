@@ -1,4 +1,4 @@
-package filepick
+package zenui
 
 import "strings"
 
@@ -15,15 +15,16 @@ const (
 )
 
 // EntryPreview is a small rendered thumbnail for an entry, supplied by the host
-// via Config.Preview. Pixels is row-major, length W*H; a fully transparent
+// via DialogConfig.Preview. Pixels is row-major, length W*H; a fully transparent
 // pixel (A==0) is not drawn (the panel background shows through).
 type EntryPreview struct {
 	W, H   int
 	Pixels []Colour
 }
 
-// Config sets up a dialog. Only FS is required; the rest have sensible defaults.
-type Config struct {
+// DialogConfig sets up a dialog. Only FS is required; the rest have sensible
+// defaults.
+type DialogConfig struct {
 	Mode       Mode
 	Title      string   // window title; defaults to "Open"/"Save"
 	StartDir   string   // initial directory; defaults to FS.UserHome()
@@ -57,7 +58,7 @@ const (
 // Update(input) and Draw(renderer). When Update returns a status other than
 // Active the dialog is finished and Result holds the chosen path (for Accepted).
 type Dialog struct {
-	cfg Config
+	cfg DialogConfig
 	fs  FS
 
 	dir       string  // current directory (absolute)
@@ -85,10 +86,10 @@ type Dialog struct {
 	upRect      Rect
 }
 
-// New creates a dialog from cfg, applying defaults and loading the start
-// directory. It never returns nil; a bad start directory leaves the dialog at
-// the filesystem root-ish home with an error message visible.
-func New(cfg Config) *Dialog {
+// NewDialog creates a dialog from cfg, applying defaults and loading the
+// start directory. It never returns nil; a bad start directory leaves the
+// dialog at the filesystem root-ish home with an error message visible.
+func NewDialog(cfg DialogConfig) *Dialog {
 	if cfg.FS == nil {
 		cfg.FS = OSFS{}
 	}

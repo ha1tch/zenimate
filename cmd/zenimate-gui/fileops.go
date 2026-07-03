@@ -6,7 +6,7 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 // fileOps owns the modal file dialog. At most one dialog is open at a time; while
@@ -18,7 +18,7 @@ import (
 // editor's main loop, which only has to ask "is a dialog active?" and route
 // input accordingly.
 type fileOps struct {
-	dlg      *filepick.Dialog
+	dlg      *zenui.Dialog
 	action   func(path string) // run on Accepted, with the chosen path
 	chooser  *exportChooser    // export format chooser, when active
 	bundle   *bundleChooser    // bundle create/add chooser, when active
@@ -34,8 +34,8 @@ func (f *fileOps) active() bool {
 
 // open starts a dialog with the given config and the action to run when the user
 // confirms a choice. Any dialog already open is replaced.
-func (f *fileOps) open(cfg filepick.Config, action func(path string)) {
-	f.dlg = filepick.New(cfg)
+func (f *fileOps) open(cfg zenui.DialogConfig, action func(path string)) {
+	f.dlg = zenui.NewDialog(cfg)
 	f.action = action
 }
 
@@ -49,49 +49,49 @@ func (f *fileOps) close() {
 // On Accepted it runs the stored action with the result and closes; on Cancelled
 // it just closes. It is a no-op when no dialog is open. Returns true if a dialog
 // was active this frame (so the caller can suppress editor input).
-func (f *fileOps) update(in filepick.Input) bool {
+func (f *fileOps) update(in zenui.Input) bool {
 	// The save-provenance chooser takes precedence, then the image fit chooser,
 	// then the bundle chooser, then the export chooser, then the file dialog.
 	if f.saveProv != nil {
 		switch r := f.saveProv.update(in); r.state {
-		case chooserPicked:
+		case zenui.Accepted:
 			sp := f.saveProv
 			f.saveProv = nil
 			f.applySaveProv(sp.ctrl, sp.src, r.toBundle)
-		case chooserCancelled:
+		case zenui.Cancelled:
 			f.saveProv = nil
 		}
 		return true
 	}
 	if f.fit != nil {
 		switch r := f.fit.update(in); r.state {
-		case chooserPicked:
+		case zenui.Accepted:
 			fc := f.fit
 			f.fit = nil
 			f.applyImageImport(fc.ctrl, fc.data, fc.name, r.mode)
-		case chooserCancelled:
+		case zenui.Cancelled:
 			f.fit = nil
 		}
 		return true
 	}
 	if f.bundle != nil {
 		switch r := f.bundle.update(in); r.state {
-		case chooserPicked:
+		case zenui.Accepted:
 			bc := f.bundle
 			f.bundle = nil
 			f.writeBundle(bc.ctrl, bc.path, bc.name, bc.label, r.mode)
-		case chooserCancelled:
+		case zenui.Cancelled:
 			f.bundle = nil
 		}
 		return true
 	}
 	if f.chooser != nil {
 		switch r := f.chooser.update(in); r.state {
-		case chooserPicked:
+		case zenui.Accepted:
 			pick := r.format
 			f.chooser = nil
 			f.startSaveExport(r.ctrl, pick)
-		case chooserCancelled:
+		case zenui.Cancelled:
 			f.chooser = nil
 		}
 		return true
@@ -100,14 +100,14 @@ func (f *fileOps) update(in filepick.Input) bool {
 		return false
 	}
 	switch f.dlg.Update(in) {
-	case filepick.Accepted:
+	case zenui.Accepted:
 		path := f.dlg.Result()
 		act := f.action
 		f.close()
 		if act != nil {
 			act(path)
 		}
-	case filepick.Cancelled:
+	case zenui.Cancelled:
 		f.close()
 	}
 	return true
@@ -179,8 +179,8 @@ func (f *fileOps) save(c *ui.Controller) {
 // regardless of provenance. On success the sprite's source becomes that file.
 func (f *fileOps) startSaveAs(c *ui.Controller) {
 	ext := model.AnimationExt(c.SaveForm())
-	f.open(filepick.Config{
-		Mode:       filepick.ModeSave,
+	f.open(zenui.DialogConfig{
+		Mode:       zenui.ModeSave,
 		Title:      "Save animation as",
 		Filters:    model.AnimationExtensions(),
 		DefaultExt: ext,
@@ -245,8 +245,8 @@ func (f *fileOps) saveIntoSourceBundle(c *ui.Controller, src ui.SpriteSource) {
 func (f *fileOps) startOpen(c *ui.Controller) {
 	filters := append(model.LoadableExtensions(), "jpg", "jpeg", "png", "gif")
 	filters = append(filters, model.BundleExtensions()...)
-	f.open(filepick.Config{
-		Mode:    filepick.ModeOpen,
+	f.open(zenui.DialogConfig{
+		Mode:    zenui.ModeOpen,
 		Title:   "Open sprite, animation, screen or image",
 		Filters: filters,
 		FS:      bundleFS(),
@@ -342,8 +342,8 @@ func (f *fileOps) startExport(c *ui.Controller) {
 // renders the current frame to that format and writes it.
 func (f *fileOps) startSaveExport(c *ui.Controller, format model.ExportFormat) {
 	ext := model.ExportExt(format)
-	f.open(filepick.Config{
-		Mode:       filepick.ModeSave,
+	f.open(zenui.DialogConfig{
+		Mode:       zenui.ModeSave,
 		Title:      "Export " + upper(ext),
 		Filters:    []string{ext},
 		DefaultExt: ext,
@@ -383,8 +383,8 @@ func lastDot(s string) int {
 // prompts for the entry's name/label.
 func (f *fileOps) startBundleExport(c *ui.Controller) {
 	ext := model.BundleExt(c.SaveForm())
-	f.open(filepick.Config{
-		Mode:       filepick.ModeSave,
+	f.open(zenui.DialogConfig{
+		Mode:       zenui.ModeSave,
 		Title:      "Save to bundle",
 		Filters:    model.BundleExtensions(),
 		DefaultExt: ext,
@@ -440,8 +440,8 @@ func (f *fileOps) writeBundle(c *ui.Controller, path, name, label string, mode b
 // startOpenInBundle opens the file dialog directly inside a bundle so the user
 // can pick which animation to open (used when a .zbun is dropped on the window).
 func (f *fileOps) startOpenInBundle(c *ui.Controller, bundlePath string) {
-	f.open(filepick.Config{
-		Mode:           filepick.ModeOpen,
+	f.open(zenui.DialogConfig{
+		Mode:           zenui.ModeOpen,
 		Title:          "Open animation from bundle",
 		Filters:        model.AnimationExtensions(),
 		FS:             bundleFS(),

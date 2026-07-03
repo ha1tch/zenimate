@@ -435,6 +435,58 @@ func (c *Controller) RemoveFrame() {
 	}
 }
 
+// InsertFrameAfter inserts an empty frame immediately after index i and
+// selects it (up to the maximum).
+func (c *Controller) InsertFrameAfter(i int) {
+	if c.Sprite.InsertFrameAt(i + 1) {
+		c.setStatus("Frame inserted (" + strconv.Itoa(c.Sprite.FrameCount()) + ")")
+	} else {
+		c.setStatus("Maximum frames reached")
+	}
+}
+
+// DeleteFrameAt removes the frame at index i (down to the minimum).
+func (c *Controller) DeleteFrameAt(i int) {
+	if c.Sprite.DeleteFrameAt(i) {
+		c.setStatus("Frame deleted (" + strconv.Itoa(c.Sprite.FrameCount()) + ")")
+	} else {
+		c.setStatus("Minimum frames reached")
+	}
+}
+
+// DuplicateFrameAt inserts a copy of the frame at index i immediately after
+// it and selects the copy (up to the maximum). Does not touch the clipboard.
+func (c *Controller) DuplicateFrameAt(i int) {
+	if c.Sprite.DuplicateFrameAt(i) {
+		c.setStatus("Frame duplicated (" + strconv.Itoa(c.Sprite.FrameCount()) + ")")
+	} else {
+		c.setStatus("Maximum frames reached")
+	}
+}
+
+// MoveFrame relocates the frame at index from to index to and selects it at
+// its new position. Silent no-op status on failure (out-of-range indices),
+// since this backs a drag gesture where a snapped-back frame speaks for
+// itself without needing an OSD message.
+func (c *Controller) MoveFrame(from, to int) {
+	if c.Sprite.MoveFrame(from, to) {
+		c.setStatus("Frame moved")
+	}
+}
+
+// InsertAndPasteAfter inserts an empty frame immediately after index i and
+// pastes the clipboard into it (up to the maximum). If the clipboard is
+// empty the inserted frame is simply left blank, matching PasteFrame's
+// existing no-op-on-empty-clipboard behaviour.
+func (c *Controller) InsertAndPasteAfter(i int) {
+	if !c.Sprite.InsertFrameAt(i + 1) {
+		c.setStatus("Maximum frames reached")
+		return
+	}
+	c.Sprite.PasteFrame()
+	c.setStatus("Frame inserted and pasted (" + strconv.Itoa(c.Sprite.FrameCount()) + ")")
+}
+
 // --- animation player ------------------------------------------------------
 
 // TogglePlay starts or stops the animation player.

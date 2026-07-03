@@ -1,4 +1,4 @@
-package filepick
+package zenui
 
 import (
 	"fmt"
@@ -61,7 +61,7 @@ type FS interface {
 }
 
 // ContainerHandler lets a host teach OSFS about descendable container files
-// (archives such as a .zbun bundle) without filepick knowing their format. The
+// (archives such as a .zbun bundle) without zenui knowing their format. The
 // host sets it on an OSFS instance before use.
 type ContainerHandler interface {
 	// IsContainer reports whether path names a container this handler understands.
@@ -84,7 +84,7 @@ func (fs OSFS) IsContainer(path string) bool {
 // ReadContainer delegates to the configured handler.
 func (fs OSFS) ReadContainer(path string) ([]Entry, error) {
 	if fs.Containers == nil {
-		return nil, fmt.Errorf("filepick: no container handler configured")
+		return nil, fmt.Errorf("zenui: no container handler configured")
 	}
 	return fs.Containers.ReadContainer(path)
 }

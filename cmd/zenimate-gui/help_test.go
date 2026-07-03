@@ -8,7 +8,7 @@ import (
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 func TestHelpModalHasContent(t *testing.T) {
@@ -49,7 +49,7 @@ func TestHelpModalScrollClamps(t *testing.T) {
 func TestHelpModalEscCloses(t *testing.T) {
 	h := newHelpModal()
 	h.layout(stubRenderer{}, 800, 600)
-	open := h.update(filepick.Input{Keys: []filepick.Key{filepick.KeyEscape}})
+	open := h.update(zenui.Input{Keys: []zenui.Key{zenui.KeyEscape}})
 	if open {
 		t.Error("Esc should close the help modal")
 	}
@@ -59,7 +59,7 @@ func TestHelpModalClickOutsideCloses(t *testing.T) {
 	h := newHelpModal()
 	h.layout(stubRenderer{}, 800, 600)
 	// A click well outside the panel closes it.
-	open := h.update(filepick.Input{MouseX: 0, MouseY: 0, MousePressed: true})
+	open := h.update(zenui.Input{MouseX: 0, MouseY: 0, MousePressed: true})
 	if open {
 		t.Error("click outside panel should close the help modal")
 	}
@@ -101,21 +101,21 @@ func TestHelpScrollbarDragMapping(t *testing.T) {
 	h := newHelpModal()
 	h.total = 200
 	h.visible = 20
-	h.track = filepick.Rect{X: 500, Y: 100, W: 8, H: 400}
-	h.thumb = filepick.Rect{X: 500, Y: 100, W: 8, H: 40}
+	h.track = zenui.Rect{X: 500, Y: 100, W: 8, H: 400}
+	h.thumb = zenui.Rect{X: 500, Y: 100, W: 8, H: 40}
 
 	// Press on the thumb (grab), offset 0.
-	h.update(filepick.Input{MouseX: 504, MouseY: 100, MousePressed: true, MouseDown: true})
+	h.update(zenui.Input{MouseX: 504, MouseY: 100, MousePressed: true, MouseDown: true})
 	if !h.dragging {
 		t.Fatal("pressing the thumb should start dragging")
 	}
 	// Drag to the very bottom of the track: scroll should reach max (total-visible).
-	h.update(filepick.Input{MouseX: 504, MouseY: 100 + 400, MouseDown: true})
+	h.update(zenui.Input{MouseX: 504, MouseY: 100 + 400, MouseDown: true})
 	if h.scroll != h.total-h.visible {
 		t.Errorf("drag to bottom: scroll=%d want %d", h.scroll, h.total-h.visible)
 	}
 	// Release stops dragging.
-	h.update(filepick.Input{MouseX: 504, MouseY: 500, MouseDown: false})
+	h.update(zenui.Input{MouseX: 504, MouseY: 500, MouseDown: false})
 	if h.dragging {
 		t.Error("releasing should stop dragging")
 	}

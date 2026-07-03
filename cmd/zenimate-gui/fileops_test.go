@@ -11,7 +11,7 @@ import (
 )
 
 // TestZCUTFileRoundTrip exercises the on-disk path used by Save/Open: marshal,
-// write, read, load. (The dialog itself is covered in the filepick package.)
+// write, read, load. (The dialog itself is covered in the zenui package.)
 func TestZCUTFileRoundTrip(t *testing.T) {
 	s := model.New(24, 16)
 	s.Set(1, 1, true)

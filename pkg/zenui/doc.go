@@ -1,4 +1,4 @@
-// Package filepick is a renderer-agnostic file Open/Save dialog widget.
+// Package zenui is a renderer-agnostic file Open/Save dialog widget.
 //
 // It owns the logic of a file dialog — directory navigation, listing, filtering,
 // selection, scrolling, filename entry and keyboard handling — but draws nothing
@@ -9,4 +9,4 @@
 //
 // It began as a standalone module and now lives inside zenimate, its only
 // consumer. It has no dependencies outside the standard library.
-package filepick
+package zenui

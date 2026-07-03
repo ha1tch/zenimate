@@ -1,4 +1,4 @@
-package filepick
+package zenui
 
 import "strings"
 
@@ -412,7 +412,7 @@ func (d *Dialog) drawClipped(r Renderer, s string, x, y, maxW int, c Colour) {
 }
 
 // drawPreview renders the preview pane for the selected in-container entry: an
-// optional thumbnail (from Config.Preview) above its metadata lines.
+// optional thumbnail (from DialogConfig.Preview) above its metadata lines.
 func (d *Dialog) drawPreview(r Renderer, theme Theme) {
 	pr := d.previewRect
 	r.FillRect(pr, theme.Field)

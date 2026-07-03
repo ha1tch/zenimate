@@ -1,10 +1,10 @@
-// Package filepick is a renderer-agnostic file Open/Save dialog widget. The
+// Package zenui is a renderer-agnostic file Open/Save dialog widget. The
 // dialog owns navigation, selection, filename entry, scrolling and keyboard
 // handling; the host supplies a thin Renderer (to draw rectangles and text) and
 // an Input snapshot (mouse and keyboard state) each frame. Because the package
 // imports no graphics library, the same dialog can be driven by raylib, Ebiten,
 // a software framebuffer, or a test harness.
-package filepick
+package zenui
 
 // Colour is a straight RGBA colour, 0..255 per channel. The host maps it to its
 // own colour type when drawing.

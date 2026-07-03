@@ -7,29 +7,29 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
-// stubRenderer satisfies filepick.Renderer with fixed metrics, so chooser layout
+// stubRenderer satisfies zenui.Renderer with fixed metrics, so chooser layout
 // and hit-testing can be exercised without a GL context or real font textures.
 type stubRenderer struct{}
 
-func (stubRenderer) FillRect(filepick.Rect, filepick.Colour)         {}
-func (stubRenderer) StrokeRect(filepick.Rect, filepick.Colour, int)  {}
-func (stubRenderer) DrawText(string, int, int, int, filepick.Colour) {}
+func (stubRenderer) FillRect(zenui.Rect, zenui.Colour)         {}
+func (stubRenderer) StrokeRect(zenui.Rect, zenui.Colour, int)  {}
+func (stubRenderer) DrawText(string, int, int, int, zenui.Colour) {}
 func (stubRenderer) TextWidth(s string, scale int) int               { return len(s) * 8 * scale }
 func (stubRenderer) LineHeight(scale int) int                        { return 8 * scale }
-func (stubRenderer) Clip(filepick.Rect)                              {}
+func (stubRenderer) Clip(zenui.Rect)                              {}
 func (stubRenderer) ClipEnd()                                        {}
 
 func TestExportChooserPick(t *testing.T) {
 	c := ui.New(16, 16)
 	ec := newExportChooser(c)
-	ec.layout(stubRenderer{}, 800, 600)
+	ec.panel.Draw(stubRenderer{}, 800, 600, zenui.DefaultTheme())
 	// Click the first option (SCR).
-	rc := ec.rects[0]
-	res := ec.update(filepick.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
-	if res.state != chooserPicked || res.format != model.FormatSCR {
+	rc := ec.panel.ItemRect(0)
+	res := ec.update(zenui.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
+	if res.state != zenui.Accepted || res.format != model.FormatSCR {
 		t.Fatalf("expected pick SCR, got state=%d format=%d", res.state, res.format)
 	}
 }
@@ -37,14 +37,14 @@ func TestExportChooserPick(t *testing.T) {
 func TestExportChooserCancel(t *testing.T) {
 	c := ui.New(16, 16)
 	ec := newExportChooser(c)
-	ec.layout(stubRenderer{}, 800, 600)
-	res := ec.update(filepick.Input{Keys: []filepick.Key{filepick.KeyEscape}})
-	if res.state != chooserCancelled {
+	ec.panel.Draw(stubRenderer{}, 800, 600, zenui.DefaultTheme())
+	res := ec.update(zenui.Input{Keys: []zenui.Key{zenui.KeyEscape}})
+	if res.state != zenui.Cancelled {
 		t.Errorf("escape should cancel, got %d", res.state)
 	}
 	// Click outside the panel also cancels.
-	res = ec.update(filepick.Input{MouseX: 0, MouseY: 0, MousePressed: true})
-	if res.state != chooserCancelled {
+	res = ec.update(zenui.Input{MouseX: 0, MouseY: 0, MousePressed: true})
+	if res.state != zenui.Cancelled {
 		t.Errorf("outside click should cancel, got %d", res.state)
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 func pngBytes(w, h int) []byte {
@@ -33,18 +33,18 @@ func pngBytes(w, h int) []byte {
 func TestFitChooserPick(t *testing.T) {
 	c := ui.New(16, 16)
 	fc := newFitChooser(c, pngBytes(40, 40), "pic.png")
-	fc.layout(stubRenderer{}, 900, 700)
-	rc := fc.rects[1] // Stretch
-	res := fc.update(filepick.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
-	if res.state != chooserPicked || res.mode != model.FitStretch {
+	fc.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme())
+	rc := fc.panel.ItemRect(1) // Stretch
+	res := fc.update(zenui.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
+	if res.state != zenui.Accepted || res.mode != model.FitStretch {
 		t.Fatalf("expected pick Stretch, got state=%d mode=%d", res.state, res.mode)
 	}
 }
 
 func TestFitChooserCancel(t *testing.T) {
 	fc := newFitChooser(ui.New(16, 16), pngBytes(8, 8), "p.png")
-	fc.layout(stubRenderer{}, 900, 700)
-	if fc.update(filepick.Input{Keys: []filepick.Key{filepick.KeyEscape}}).state != chooserCancelled {
+	fc.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme())
+	if fc.update(zenui.Input{Keys: []zenui.Key{zenui.KeyEscape}}).state != zenui.Cancelled {
 		t.Error("escape should cancel")
 	}
 }
@@ -65,9 +65,9 @@ func TestDropImageOpensFitChooser(t *testing.T) {
 		t.Error("sprite should be unchanged until a fit strategy is chosen")
 	}
 	// Now pick Best fit via update and confirm the sprite becomes a full screen.
-	f.fit.layout(stubRenderer{}, 900, 700) // draw normally does this each frame
-	rc := f.fit.rects[0]
-	f.update(filepick.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
+	f.fit.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme()) // draw normally does this each frame
+	rc := f.fit.panel.ItemRect(0)
+	f.update(zenui.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true})
 	if f.fit != nil {
 		t.Error("fit chooser should close after a pick")
 	}

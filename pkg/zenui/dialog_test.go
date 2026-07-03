@@ -1,4 +1,4 @@
-package filepick
+package zenui
 
 import (
 	"strings"
@@ -96,7 +96,7 @@ func (noopRenderer) Clip(Rect)                              {}
 func (noopRenderer) ClipEnd()                               {}
 
 func TestOpenFiltersAndSorts(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", Filters: []string{"zcut"}, FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", Filters: []string{"zcut"}, FS: sampleFS()})
 	// Directories and containers are always shown; among plain files only .zcut
 	// matches the filter. Sort order: dirs first, then the rest alphabetically —
 	// so "art" (dir), then "game.zbun" (container), then "hero.zcut".
@@ -111,7 +111,7 @@ func TestOpenFiltersAndSorts(t *testing.T) {
 }
 
 func TestOpenSelectFileEnablesAccept(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	if d.canAccept() {
 		t.Fatal("nothing selected: accept should be disabled")
 	}
@@ -131,7 +131,7 @@ func TestOpenSelectFileEnablesAccept(t *testing.T) {
 }
 
 func TestOpenSelectDirDisablesAccept(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	d.sel = 0 // "art/" directory
 	if d.canAccept() {
 		t.Error("a directory selected should not enable Open")
@@ -143,7 +143,7 @@ func TestOpenSelectDirDisablesAccept(t *testing.T) {
 }
 
 func TestGoUp(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u/art", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u/art", FS: sampleFS()})
 	d.goUp()
 	if d.Dir() != "/home/u" {
 		t.Errorf("goUp -> %q, want /home/u", d.Dir())
@@ -151,7 +151,7 @@ func TestGoUp(t *testing.T) {
 }
 
 func TestSaveTypingAndDefaultExt(t *testing.T) {
-	d := New(Config{Mode: ModeSave, StartDir: "/home/u", DefaultExt: "zcut", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeSave, StartDir: "/home/u", DefaultExt: "zcut", FS: sampleFS()})
 	if d.canAccept() {
 		t.Fatal("empty filename: save disabled")
 	}
@@ -170,7 +170,7 @@ func TestSaveTypingAndDefaultExt(t *testing.T) {
 }
 
 func TestSaveKeepsTypedExtension(t *testing.T) {
-	d := New(Config{Mode: ModeSave, StartDir: "/home/u", DefaultExt: "zcut", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeSave, StartDir: "/home/u", DefaultExt: "zcut", FS: sampleFS()})
 	d.name = "pic.scr"
 	d.accept()
 	if !strings.HasSuffix(d.Result(), "/home/u/pic.scr") {
@@ -179,14 +179,14 @@ func TestSaveKeepsTypedExtension(t *testing.T) {
 }
 
 func TestEscapeCancels(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	if st := d.Update(Input{Keys: []Key{KeyEscape}}); st != Cancelled {
 		t.Errorf("escape -> %v, want Cancelled", st)
 	}
 }
 
 func TestArrowNavigationWraDirsFirst(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	d.Update(Input{Keys: []Key{KeyDown}}) // sel 0
 	d.Update(Input{Keys: []Key{KeyDown}}) // sel 1
 	if d.sel != 1 {
@@ -199,7 +199,7 @@ func TestArrowNavigationWraDirsFirst(t *testing.T) {
 }
 
 func TestMouseClickSelectsAndOpensViaDraw(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	r := noopRenderer{}
 	// Draw once to populate layout rects.
 	d.Draw(r, 800, 600, DefaultTheme())
@@ -218,7 +218,7 @@ func TestMouseClickSelectsAndOpensViaDraw(t *testing.T) {
 }
 
 func TestClickOutsideCancels(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	d.Draw(noopRenderer{}, 800, 600, DefaultTheme())
 	// Click at (0,0), which is on the backdrop, outside the panel.
 	if st := d.Update(Input{MouseX: 0, MouseY: 0, MousePressed: true}); st != Cancelled {
@@ -227,7 +227,7 @@ func TestClickOutsideCancels(t *testing.T) {
 }
 
 func TestSidebarPlaceNavigates(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	d.Draw(noopRenderer{}, 800, 600, DefaultTheme())
 	// Click the second place ("Art" -> /home/u/art).
 	if len(d.placeRects) < 2 {
@@ -242,7 +242,7 @@ func TestSidebarPlaceNavigates(t *testing.T) {
 
 func TestSidebarClickDoesNotPaintList(t *testing.T) {
 	// A click on a sidebar place must not also register as a file-list selection.
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	d.Draw(noopRenderer{}, 800, 600, DefaultTheme())
 	pr := d.placeRects[0]
 	d.Update(Input{MouseX: pr.X + 4, MouseY: pr.Y + 2, MousePressed: true})
@@ -252,7 +252,7 @@ func TestSidebarClickDoesNotPaintList(t *testing.T) {
 }
 
 func TestEnterAndExitContainer(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	// Find and select the bundle, then open it.
 	bi := -1
 	for i, e := range d.entries {
@@ -286,7 +286,7 @@ func TestEnterAndExitContainer(t *testing.T) {
 }
 
 func TestContainerGoUpExits(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	for i, e := range d.entries {
 		if e.Name == "game.zbun" {
 			d.sel = i
@@ -307,7 +307,7 @@ func TestContainerGoUpExits(t *testing.T) {
 
 func TestContainerNotAcceptedDirectly(t *testing.T) {
 	// Selecting the container itself must not enable Open (it is for descending).
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	for i, e := range d.entries {
 		if e.Name == "game.zbun" {
 			d.sel = i
@@ -319,7 +319,7 @@ func TestContainerNotAcceptedDirectly(t *testing.T) {
 }
 
 func TestPreviewPaneLayoutInContainer(t *testing.T) {
-	d := New(Config{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
+	d := NewDialog(DialogConfig{Mode: ModeOpen, StartDir: "/home/u", FS: sampleFS()})
 	// Enter the container and lay out; the preview rect should be non-empty.
 	for i, e := range d.entries {
 		if e.Name == "game.zbun" {

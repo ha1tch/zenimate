@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 //go:embed help.txt
@@ -25,7 +25,7 @@ const (
 // helpPanelWidth returns the panel width for a 70-column body at the given text
 // scale: the measured text width plus horizontal padding and the scrollbar
 // gutter.
-func helpPanelWidth(r filepick.Renderer, scale int) int {
+func helpPanelWidth(r zenui.Renderer, scale int) int {
 	pad := r.LineHeight(1)
 	cols := strings.Repeat("M", helpTargetCols)
 	return r.TextWidth(cols, scale) + 2*pad + 12
@@ -34,7 +34,7 @@ func helpPanelWidth(r filepick.Renderer, scale int) int {
 // helpBodyScaleFor picks the body text scale: the base scale if a 70-column
 // panel fits within the screen width at that scale, otherwise 1. Only width
 // matters.
-func helpBodyScaleFor(r filepick.Renderer, screenW int) int {
+func helpBodyScaleFor(r zenui.Renderer, screenW int) int {
 	pad := r.LineHeight(1)
 	if helpPanelWidth(r, helpBodyScaleBase) <= screenW-2*pad {
 		return helpBodyScaleBase
@@ -45,17 +45,17 @@ func helpBodyScaleFor(r filepick.Renderer, screenW int) int {
 type helpModal struct {
 	lines    []string
 	scroll   int // first visible line index
-	panel    filepick.Rect
-	body     filepick.Rect // text area (inside the panel, above nothing)
-	closeBx  filepick.Rect
+	panel    zenui.Rect
+	body     zenui.Rect // text area (inside the panel, above nothing)
+	closeBx  zenui.Rect
 	visible  int // lines that fit in the body (set during layout)
 	total    int
 	bodyLH   int // body line height at the effective scale (set during layout)
 	effScale int // effective body text scale for the current screen width
 
 	// scrollbar drag state
-	track      filepick.Rect
-	thumb      filepick.Rect
+	track      zenui.Rect
+	thumb      zenui.Rect
 	dragging   bool
 	dragOffset int // pointer offset within the thumb at grab time
 }
@@ -89,7 +89,7 @@ func helpLineKind(line string) (helpKind, string) {
 	}
 }
 
-func (h *helpModal) layout(r filepick.Renderer, screenW, screenH int) {
+func (h *helpModal) layout(r zenui.Renderer, screenW, screenH int) {
 	lh := r.LineHeight(1)
 	pad := lh
 	// raylib 2D drawing is in logical screen coordinates, so font width at a given
@@ -110,14 +110,14 @@ func (h *helpModal) layout(r filepick.Renderer, screenW, screenH int) {
 	}
 	px := (screenW - pw) / 2
 	py := (screenH - ph) / 2
-	h.panel = filepick.Rect{X: px, Y: py, W: pw, H: ph}
+	h.panel = zenui.Rect{X: px, Y: py, W: pw, H: ph}
 
 	titleH := r.LineHeight(2) + 8
 	// Close box: top-right corner of the panel.
 	cb := r.LineHeight(2)
-	h.closeBx = filepick.Rect{X: px + pw - pad - cb, Y: py + pad, W: cb, H: cb}
+	h.closeBx = zenui.Rect{X: px + pw - pad - cb, Y: py + pad, W: cb, H: cb}
 
-	h.body = filepick.Rect{
+	h.body = zenui.Rect{
 		X: px + pad,
 		Y: py + pad + titleH,
 		W: pw - 2*pad - 12, // leave room for the scrollbar on the right
@@ -152,22 +152,22 @@ func (h *helpModal) clampScroll() {
 
 // update handles scrolling and dismissal. It returns false when the modal should
 // close.
-func (h *helpModal) update(in filepick.Input) bool {
+func (h *helpModal) update(in zenui.Input) bool {
 	for _, k := range in.Keys {
 		switch k {
-		case filepick.KeyEscape:
+		case zenui.KeyEscape:
 			return false
-		case filepick.KeyUp:
+		case zenui.KeyUp:
 			h.scroll--
-		case filepick.KeyDown:
+		case zenui.KeyDown:
 			h.scroll++
-		case filepick.KeyPageUp:
+		case zenui.KeyPageUp:
 			h.scroll -= h.visible
-		case filepick.KeyPageDown:
+		case zenui.KeyPageDown:
 			h.scroll += h.visible
 		}
 	}
-	// Home/End are not in the shared filepick key set; read them directly.
+	// Home/End are not in the shared zenui key set; read them directly.
 	if rl.IsKeyPressed(rl.KeyHome) {
 		h.scroll = 0
 	}
@@ -223,12 +223,12 @@ func (h *helpModal) update(in filepick.Input) bool {
 }
 
 func (h *helpModal) draw(r fpRenderer, screenW, screenH int) {
-	h.layout(filepick.Renderer(r), screenW, screenH)
+	h.layout(zenui.Renderer(r), screenW, screenH)
 	th := fpTheme()
 	lh := r.LineHeight(1)
 	pad := lh
 
-	r.FillRect(filepick.Rect{X: 0, Y: 0, W: screenW, H: screenH}, th.Backdrop)
+	r.FillRect(zenui.Rect{X: 0, Y: 0, W: screenW, H: screenH}, th.Backdrop)
 	r.FillRect(h.panel, th.Panel)
 	r.StrokeRect(h.panel, th.Border, 1)
 
@@ -275,7 +275,7 @@ func (h *helpModal) draw(r fpRenderer, screenW, screenH int) {
 	// Scrollbar on the right of the body, when content overflows. The track and
 	// thumb rects are stored so update() can hit-test drags.
 	if h.total > h.visible {
-		h.track = filepick.Rect{X: h.body.X + h.body.W + 6, Y: h.body.Y, W: 8, H: h.body.H}
+		h.track = zenui.Rect{X: h.body.X + h.body.W + 6, Y: h.body.Y, W: 8, H: h.body.H}
 		r.FillRect(h.track, th.Button)
 		frac := float32(h.visible) / float32(h.total)
 		thumbH := int(float32(h.track.H) * frac)
@@ -287,14 +287,14 @@ func (h *helpModal) draw(r fpRenderer, screenW, screenH int) {
 			pos = float32(h.scroll) / float32(h.total-h.visible)
 		}
 		thumbY := h.track.Y + int(float32(h.track.H-thumbH)*pos)
-		h.thumb = filepick.Rect{X: h.track.X, Y: thumbY, W: h.track.W, H: thumbH}
+		h.thumb = zenui.Rect{X: h.track.X, Y: thumbY, W: h.track.W, H: thumbH}
 		thumbCol := th.DirText
 		if h.dragging {
 			thumbCol = th.Text
 		}
 		r.FillRect(h.thumb, thumbCol)
 	} else {
-		h.track = filepick.Rect{}
-		h.thumb = filepick.Rect{}
+		h.track = zenui.Rect{}
+		h.thumb = zenui.Rect{}
 	}
 }

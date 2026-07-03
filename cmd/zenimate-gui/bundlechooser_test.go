@@ -9,7 +9,7 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 func TestBundleChooserNewFileOffersCreateOnly(t *testing.T) {
@@ -29,14 +29,19 @@ func TestBundleChooserExistingOffersAddAndReplace(t *testing.T) {
 	}
 }
 
-func TestBundleChooserPickAndCancel(t *testing.T) {
+func TestBundleChooserPick(t *testing.T) {
 	bc := newBundleChooser(ui.New(16, 16), "/tmp/x.zbun", "knight", "", true)
-	bc.layout(stubRenderer{}, 900, 700)
-	rc := bc.rects[0] // Add
-	if r := bc.update(filepick.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true}); r.state != chooserPicked || r.mode != bundleAdd {
+	bc.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme())
+	rc := bc.panel.ItemRect(0) // Add
+	if r := bc.update(zenui.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true}); r.state != zenui.Accepted || r.mode != bundleAdd {
 		t.Errorf("expected pick Add, got %+v", r)
 	}
-	if bc.update(filepick.Input{Keys: []filepick.Key{filepick.KeyEscape}}).state != chooserCancelled {
+}
+
+func TestBundleChooserCancel(t *testing.T) {
+	bc := newBundleChooser(ui.New(16, 16), "/tmp/x.zbun", "knight", "", true)
+	bc.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme())
+	if bc.update(zenui.Input{Keys: []zenui.Key{zenui.KeyEscape}}).state != zenui.Cancelled {
 		t.Error("escape should cancel")
 	}
 }

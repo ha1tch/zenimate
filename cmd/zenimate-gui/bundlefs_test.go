@@ -9,7 +9,7 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 func writeTestBundle(t *testing.T) string {
@@ -53,7 +53,7 @@ func TestBundleContainerReadEntries(t *testing.T) {
 		t.Fatalf("got %d entries, want 2", len(entries))
 	}
 	// knight should carry frames/size/label metadata.
-	var knight *filepick.Entry
+	var knight *zenui.Entry
 	for i := range entries {
 		if entries[i].Name == "knight" {
 			knight = &entries[i]
@@ -75,7 +75,7 @@ func TestBundleContainerReadEntries(t *testing.T) {
 
 func TestBundlePreviewThumbnail(t *testing.T) {
 	p := writeTestBundle(t)
-	pv := bundlePreview(p, filepick.Entry{Name: "knight"})
+	pv := bundlePreview(p, zenui.Entry{Name: "knight"})
 	if pv == nil {
 		t.Fatal("expected a thumbnail")
 	}
@@ -83,7 +83,7 @@ func TestBundlePreviewThumbnail(t *testing.T) {
 		t.Errorf("thumbnail dims wrong: %dx%d, %d px", pv.W, pv.H, len(pv.Pixels))
 	}
 	// Preview for a plain (non-container) entry is nil.
-	if bundlePreview("", filepick.Entry{Name: "x"}) != nil {
+	if bundlePreview("", zenui.Entry{Name: "x"}) != nil {
 		t.Error("no container => no preview")
 	}
 }

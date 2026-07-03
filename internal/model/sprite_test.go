@@ -173,6 +173,200 @@ func TestAddRemoveFrame(t *testing.T) {
 	}
 }
 
+func TestInsertFrameAt(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 2 {
+		s.RemoveFrame()
+	}
+	s.Select(0)
+	s.Set(0, 0, true)
+	s.Select(1)
+	s.Set(1, 0, true)
+
+	if !s.InsertFrameAt(1) {
+		t.Fatal("InsertFrameAt returned false unexpectedly")
+	}
+	if s.FrameCount() != 3 {
+		t.Fatalf("FrameCount = %d, want 3", s.FrameCount())
+	}
+	if s.Selected() != 1 {
+		t.Fatalf("Selected() = %d, want 1 (the new frame)", s.Selected())
+	}
+	s.Select(1)
+	if s.At(0, 0) || s.At(1, 0) {
+		t.Error("inserted frame should be empty")
+	}
+	s.Select(0)
+	if !s.At(0, 0) {
+		t.Error("frame 0's content should be unchanged")
+	}
+	s.Select(2)
+	if !s.At(1, 0) {
+		t.Error("original frame 1's content should now be at index 2")
+	}
+}
+
+func TestInsertFrameAtRespectsMaxFrames(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() < MaxFrames {
+		s.AddFrame()
+	}
+	if s.InsertFrameAt(0) {
+		t.Fatal("InsertFrameAt should fail at MaxFrames")
+	}
+}
+
+func TestDeleteFrameAt(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 3 {
+		s.RemoveFrame()
+	}
+	s.Select(0)
+	s.Set(0, 0, true)
+	s.Select(1)
+	s.Set(1, 0, true)
+	s.Select(2)
+	s.Set(2, 0, true)
+
+	if !s.DeleteFrameAt(1) {
+		t.Fatal("DeleteFrameAt returned false unexpectedly")
+	}
+	if s.FrameCount() != 2 {
+		t.Fatalf("FrameCount = %d, want 2", s.FrameCount())
+	}
+	s.Select(0)
+	if !s.At(0, 0) {
+		t.Error("frame 0's content should be unchanged")
+	}
+	s.Select(1)
+	if !s.At(2, 0) {
+		t.Error("original frame 2's content should now be at index 1")
+	}
+}
+
+func TestDeleteFrameAtRespectsMinFrames(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > MinFrames {
+		s.RemoveFrame()
+	}
+	if s.DeleteFrameAt(0) {
+		t.Fatal("DeleteFrameAt should fail at MinFrames")
+	}
+}
+
+func TestDeleteFrameAtClampsSelection(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 3 {
+		s.RemoveFrame()
+	}
+	s.Select(2)
+	if !s.DeleteFrameAt(2) {
+		t.Fatal("DeleteFrameAt returned false unexpectedly")
+	}
+	if s.Selected() != 1 {
+		t.Fatalf("Selected() = %d, want 1 (clamped to new last index)", s.Selected())
+	}
+}
+
+// TestMoveFrame moves frame 1 (B) to index 3 in [A,B,C,D,E], hand-computed
+// expected result: [A,C,D,B,E].
+func TestMoveFrame(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 5 {
+		s.RemoveFrame()
+	}
+	for i := 0; i < 5; i++ {
+		s.Select(i)
+		s.Set(i, 0, true)
+	}
+	if !s.MoveFrame(1, 3) {
+		t.Fatal("MoveFrame returned false unexpectedly")
+	}
+	if s.Selected() != 3 {
+		t.Fatalf("Selected() = %d, want 3", s.Selected())
+	}
+	want := []int{0, 2, 3, 1, 4}
+	for idx, mark := range want {
+		s.Select(idx)
+		if !s.At(mark, 0) {
+			t.Errorf("index %d: expected original frame %d's mark, not found", idx, mark)
+		}
+	}
+}
+
+// TestMoveFrameOtherDirection moves frame 3 (D) to index 1 in [A,B,C,D,E],
+// hand-computed expected result: [A,D,B,C,E].
+func TestMoveFrameOtherDirection(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 5 {
+		s.RemoveFrame()
+	}
+	for i := 0; i < 5; i++ {
+		s.Select(i)
+		s.Set(i, 0, true)
+	}
+	if !s.MoveFrame(3, 1) {
+		t.Fatal("MoveFrame returned false unexpectedly")
+	}
+	want := []int{0, 3, 1, 2, 4}
+	for idx, mark := range want {
+		s.Select(idx)
+		if !s.At(mark, 0) {
+			t.Errorf("index %d: expected original frame %d's mark, not found", idx, mark)
+		}
+	}
+}
+
+func TestMoveFrameOutOfRange(t *testing.T) {
+	s := New(8, 8)
+	if s.MoveFrame(-1, 0) || s.MoveFrame(0, 99) {
+		t.Error("MoveFrame should fail on out-of-range indices")
+	}
+}
+
+func TestDuplicateFrameAt(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() > 2 {
+		s.RemoveFrame()
+	}
+	s.Select(0)
+	s.Set(0, 0, true)
+	s.CopyFrame() // put something in the clipboard first, to prove duplicate leaves it alone
+	s.Select(1)
+	s.Set(1, 0, true)
+
+	if !s.DuplicateFrameAt(0) {
+		t.Fatal("DuplicateFrameAt returned false unexpectedly")
+	}
+	if s.FrameCount() != 3 {
+		t.Fatalf("FrameCount = %d, want 3", s.FrameCount())
+	}
+	if s.Selected() != 1 {
+		t.Fatalf("Selected() = %d, want 1 (the new duplicate)", s.Selected())
+	}
+	s.Select(1)
+	if !s.At(0, 0) {
+		t.Error("duplicate should carry the source frame's content")
+	}
+	s.Select(2)
+	if !s.At(1, 0) {
+		t.Error("original frame 1's content should now be at index 2")
+	}
+	if !s.HasClipboard() {
+		t.Error("duplicate should not touch the clipboard")
+	}
+}
+
+func TestDuplicateFrameAtRespectsMaxFrames(t *testing.T) {
+	s := New(8, 8)
+	for s.FrameCount() < MaxFrames {
+		s.AddFrame()
+	}
+	if s.DuplicateFrameAt(0) {
+		t.Fatal("DuplicateFrameAt should fail at MaxFrames")
+	}
+}
+
 func TestAttributesDefaultAndSet(t *testing.T) {
 	s := New(16, 16)
 	if s.AttrCols() != 2 || s.AttrRows() != 2 {

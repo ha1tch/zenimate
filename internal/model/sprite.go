@@ -235,6 +235,114 @@ func (s *Sprite) RemoveFrame() bool {
 	return true
 }
 
+// InsertFrameAt inserts one empty frame (with default attributes) at index i
+// and selects it, up to MaxFrames. i is clamped to [0, FrameCount()]. Returns
+// false if already at the maximum.
+func (s *Sprite) InsertFrameAt(i int) bool {
+	if len(s.frames) >= MaxFrames {
+		return false
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i > len(s.frames) {
+		i = len(s.frames)
+	}
+	blank := make(Frame, s.width*s.height)
+	attr := make([]byte, s.attrCols*s.attrRows)
+	for j := range attr {
+		attr[j] = DefaultAttr
+	}
+
+	s.frames = append(s.frames, nil)
+	copy(s.frames[i+1:], s.frames[i:])
+	s.frames[i] = blank
+
+	s.frameAttrs = append(s.frameAttrs, nil)
+	copy(s.frameAttrs[i+1:], s.frameAttrs[i:])
+	s.frameAttrs[i] = attr
+
+	s.selected = i
+	s.notify()
+	return true
+}
+
+// DeleteFrameAt removes the frame at index i, down to MinFrames. The
+// selection is clamped to stay valid. Returns false if already at the
+// minimum or i is out of range.
+func (s *Sprite) DeleteFrameAt(i int) bool {
+	if len(s.frames) <= MinFrames || i < 0 || i >= len(s.frames) {
+		return false
+	}
+	s.frames = append(s.frames[:i], s.frames[i+1:]...)
+	s.frameAttrs = append(s.frameAttrs[:i], s.frameAttrs[i+1:]...)
+	switch {
+	case s.selected >= len(s.frames):
+		s.selected = len(s.frames) - 1
+	case s.selected > i:
+		s.selected--
+	}
+	s.notify()
+	return true
+}
+
+// MoveFrame relocates the frame at index from to index to, shifting the
+// frames between them, and selects it at its new position. Returns false if
+// either index is out of range.
+func (s *Sprite) MoveFrame(from, to int) bool {
+	n := len(s.frames)
+	if from < 0 || from >= n || to < 0 || to >= n {
+		return false
+	}
+	if from == to {
+		s.selected = to
+		s.notify()
+		return true
+	}
+	f := s.frames[from]
+	a := s.frameAttrs[from]
+
+	s.frames = append(s.frames[:from], s.frames[from+1:]...)
+	s.frameAttrs = append(s.frameAttrs[:from], s.frameAttrs[from+1:]...)
+
+	s.frames = append(s.frames, nil)
+	copy(s.frames[to+1:], s.frames[to:])
+	s.frames[to] = f
+
+	s.frameAttrs = append(s.frameAttrs, nil)
+	copy(s.frameAttrs[to+1:], s.frameAttrs[to:])
+	s.frameAttrs[to] = a
+
+	s.selected = to
+	s.notify()
+	return true
+}
+
+// DuplicateFrameAt inserts a copy of the frame at index i immediately after
+// it, and selects the new copy, up to MaxFrames. Unlike CopyFrame/PasteFrame,
+// this does not touch the user-facing clipboard. Returns false if already at
+// the maximum or i is out of range.
+func (s *Sprite) DuplicateFrameAt(i int) bool {
+	if len(s.frames) >= MaxFrames || i < 0 || i >= len(s.frames) {
+		return false
+	}
+	dup := s.frames[i].clone()
+	dupAttr := append([]byte(nil), s.frameAttrs[i]...)
+
+	at := i + 1
+	s.frames = append(s.frames, nil)
+	copy(s.frames[at+1:], s.frames[at:])
+	s.frames[at] = dup
+
+	s.frameAttrs = append(s.frameAttrs, nil)
+	copy(s.frameAttrs[at+1:], s.frameAttrs[at:])
+	s.frameAttrs[at] = dupAttr
+
+	s.selected = at
+	s.notify()
+	return true
+}
+
 // Set forces pixel (x,y) of the selected frame to the given value. Out-of-range
 // coordinates are ignored.
 func (s *Sprite) Set(x, y int, on bool) {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
-	"github.com/ha1tch/zenimate/pkg/filepick"
+	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
 // Saving a file-sourced sprite overwrites that file silently (no dialog).
@@ -127,13 +127,13 @@ func TestSaveProvChooserOptions(t *testing.T) {
 	c := ui.New(16, 16)
 	src := ui.SpriteSource{Kind: ui.SourceBundle, Path: "/x/game.zbun", Entry: "knight"}
 	sp := newSaveProvChooser(c, src)
-	sp.layout(stubRenderer{}, 900, 700)
+	sp.panel.Draw(stubRenderer{}, 900, 700, zenui.DefaultTheme())
 	if len(sp.options) != 2 {
 		t.Fatalf("expected 2 options, got %d", len(sp.options))
 	}
 	// First option updates the bundle.
-	rc := sp.rects[0]
-	if r := sp.update(filepick.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true}); r.state != chooserPicked || !r.toBundle {
+	rc := sp.panel.ItemRect(0)
+	if r := sp.update(zenui.Input{MouseX: rc.X + 4, MouseY: rc.Y + 4, MousePressed: true}); r.state != zenui.Accepted || !r.toBundle {
 		t.Errorf("first option should pick update-in-bundle, got %+v", r)
 	}
 }
@@ -152,7 +152,7 @@ func TestDropBundleOpensBrowser(t *testing.T) {
 	if f.dlg == nil {
 		t.Fatal("dropping a .zbun should open the browse dialog")
 	}
-	if f.dlg.Status() != filepick.Active {
+	if f.dlg.Status() != zenui.Active {
 		t.Error("dialog should be active")
 	}
 }

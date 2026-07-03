@@ -3,6 +3,45 @@
 All notable changes to zenimate are documented here.
 The format follows Keep a Changelog; versions follow semantic versioning.
 
+## [0.6.1]
+
+A right-click context menu and drag-to-reorder for the frame strip, built on a
+new general-purpose UI toolkit consolidated from what was previously a
+file-dialog-only package.
+
+### Added
+- A right-click context menu on each frame button: Insert empty frame,
+  Duplicate frame, Copy frame, Paste frame, Insert and paste, Delete frame.
+  Right-clicking selects that frame first. Items disable themselves correctly
+  at the frame-count bounds (Insert/Duplicate/Insert-and-paste at 16 frames,
+  Delete at 1) and when the clipboard is empty (Paste, Insert and paste), so
+  nothing offered can fail when picked.
+- Drag-to-reorder on the frame strip: press and hold past a small movement
+  threshold to pick up a frame, shown as a pulsating badge that follows the
+  pointer, with a vertical insertion-line indicator showing where it will
+  land. Releasing inside the strip reorders; releasing outside it, or
+  pressing Escape mid-drag, cancels without changing anything. The moved
+  frame stays selected at its new position.
+- `pkg/zenui`: a new `Menu` widget (the dropdown behind the context menu) and
+  a new `OptionPanel` widget (a centred, auto-sized option-list modal),
+  alongside the existing file dialog — all sharing one `Renderer`/`Input`
+  contract and one `Status` lifecycle (`Active`/`Accepted`/`Cancelled`).
+
+### Changed
+- `pkg/filepick` is renamed to `pkg/zenui` and is no longer file-dialog-only:
+  it's now the shared, renderer-agnostic UI toolkit behind the file dialog,
+  the frame context menu, and every chooser modal. `Config`/`New` are now
+  `DialogConfig`/`NewDialog` on the file dialog, to make room for
+  `MenuConfig`/`NewMenu` and `OptionPanelConfig`/`NewOptionPanel` alongside
+  it under one shared `Status` type.
+- The four chooser modals (export format, bundle create/add, image-import fit
+  strategy, save-provenance) are now all built on `zenui.OptionPanel` instead
+  of near-identical hand-rolled implementations. Panel width is now
+  auto-sized to the widest title, subtitle, option, or Cancel label, rather
+  than a different hardcoded pixel width per chooser. Hover is now computed
+  from the same per-frame input snapshot every other widget uses, rather than
+  reading the pointer directly from the graphics backend.
+
 ## [0.6.0]
 
 A window- and screen-aware zoom model, frame transforms, a safer reset, and a
