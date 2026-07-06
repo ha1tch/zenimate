@@ -14,13 +14,13 @@ import (
 // and hit-testing can be exercised without a GL context or real font textures.
 type stubRenderer struct{}
 
-func (stubRenderer) FillRect(zenui.Rect, zenui.Colour)         {}
-func (stubRenderer) StrokeRect(zenui.Rect, zenui.Colour, int)  {}
+func (stubRenderer) FillRect(zenui.Rect, zenui.Colour)            {}
+func (stubRenderer) StrokeRect(zenui.Rect, zenui.Colour, int)     {}
 func (stubRenderer) DrawText(string, int, int, int, zenui.Colour) {}
-func (stubRenderer) TextWidth(s string, scale int) int               { return len(s) * 8 * scale }
-func (stubRenderer) LineHeight(scale int) int                        { return 8 * scale }
+func (stubRenderer) TextWidth(s string, scale int) int            { return len(s) * 8 * scale }
+func (stubRenderer) LineHeight(scale int) int                     { return 8 * scale }
 func (stubRenderer) Clip(zenui.Rect)                              {}
-func (stubRenderer) ClipEnd()                                        {}
+func (stubRenderer) ClipEnd()                                     {}
 
 func TestExportChooserPick(t *testing.T) {
 	c := ui.New(16, 16)
@@ -60,8 +60,8 @@ func TestDrawerHasExportButton(t *testing.T) {
 	c := ui.New(16, 16)
 	l := computeLayout(980, 680, c, &fileOps{}, 0, 1)
 	found := false
-	for _, b := range l.buttons {
-		if b.label == "Export" {
+	for _, b := range l.Buttons {
+		if b.Label == "Export" {
 			found = true
 		}
 	}

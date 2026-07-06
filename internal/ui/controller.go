@@ -1,5 +1,5 @@
 // Package ui holds the frontend-independent controller that sits between the
-// sprite model and whatever presents it (the TUI or the raylib GUI). It owns the
+// sprite model and the raylib GUI that presents it. It owns the
 // editing actions and the animation player state, so both frontends share one
 // behaviour and only differ in presentation and input.
 //
@@ -315,7 +315,35 @@ func (c *Controller) Set(x, y int, on bool) {
 // Paint sets pixel (x,y) on or off. It no longer stamps attributes — attribute
 // painting is a separate, explicitly-modified action (see PaintAttr), so normal
 // drawing never disturbs a cell's colours.
+// paintAllowed reports whether (x,y) may be painted given the current
+// selection: always true with no active selection, otherwise only true
+// within its bounds. Every drawing tool (paintbrush, fill, the shape tools,
+// text) funnels through Paint/PaintAttr, so checking it here clips all of
+// them uniformly — matching Photoshop, where an active selection clips
+// every paint operation, not just some. Selection's own move/duplicate/
+// flip/rotate operations bypass this entirely (they manipulate the sprite
+// directly in internal/model/selection.go), which is the right boundary:
+// a selection's own transform shouldn't clip against itself.
+func (c *Controller) paintAllowed(x, y int) bool {
+	sx, sy, sw, sh, ok := c.Selection()
+	if !ok {
+		return true
+	}
+	return x >= sx && x < sx+sw && y >= sy && y < sy+sh
+}
+
 func (c *Controller) Paint(x, y int, on bool) {
+	if !c.paintAllowed(x, y) {
+		return
+	}
+	c.Sprite.Set(x, y, on)
+	c.markPixel(x, y)
+}
+
+// PaintUnclipped sets a pixel without checking selection bounds — the text
+// tool's deliberate exception to selection clipping (every other paint
+// operation goes through Paint/PaintAttr and is clipped).
+func (c *Controller) PaintUnclipped(x, y int, on bool) {
 	c.Sprite.Set(x, y, on)
 	c.markPixel(x, y)
 }
@@ -325,6 +353,20 @@ func (c *Controller) Paint(x, y int, on bool) {
 // this when the user paints with Ctrl held (Ctrl acts as an attribute-paint
 // modifier). Meaningful in Spectrum Colour mode; harmless in any mode.
 func (c *Controller) PaintAttr(x, y int) {
+	if !c.paintAllowed(x, y) {
+		return
+	}
+	cx, cy := x/8, y/8
+	a := c.Sprite.AttrCell(cx, cy)
+	na := zxpalette.Attr(c.ink, c.paper, c.bright, zxpalette.Flash(a))
+	c.Sprite.SetAttrCell(cx, cy, na)
+	c.markPixel(x, y)
+}
+
+// PaintAttrUnclipped stamps the current ink/paper without checking
+// selection bounds — the text tool's own Ctrl/ATTR-ON attribute stamp is,
+// like PaintUnclipped, the established exception to selection clipping.
+func (c *Controller) PaintAttrUnclipped(x, y int) {
 	cx, cy := x/8, y/8
 	a := c.Sprite.AttrCell(cx, cy)
 	na := zxpalette.Attr(c.ink, c.paper, c.bright, zxpalette.Flash(a))
@@ -360,7 +402,41 @@ func (c *Controller) PrevFrame() {
 // CopyFrame / PasteFrame / ClearFrame operate on the selected frame.
 func (c *Controller) CopyFrame()  { c.Sprite.CopyFrame(); c.setStatus("Frame copied") }
 func (c *Controller) PasteFrame() { c.Sprite.PasteFrame(); c.setStatus("Frame pasted") }
-func (c *Controller) ClearFrame() { c.Sprite.ClearFrame() }
+
+// Selection: a rectangular region of the current frame, and (while a move or
+// paste is in progress) a floating buffer of lifted content not yet written
+// back. See internal/model/selection.go for the full semantics. Status
+// messages are only set on the explicit, user-facing operations (copy,
+// paste, clear) — the lower-level primitives called every frame during a
+// drag (SetSelection, LiftSelection, MoveFloatingTo) stay quiet to avoid a
+// flickering status line.
+func (c *Controller) SetSelection(x0, y0, x1, y1 int)      { c.Sprite.SetSelection(x0, y0, x1, y1) }
+func (c *Controller) HasSelection() bool                   { return c.Sprite.HasSelection() }
+func (c *Controller) Selection() (x, y, w, h int, ok bool) { return c.Sprite.Selection() }
+func (c *Controller) IsFloating() bool                     { return c.Sprite.IsFloating() }
+func (c *Controller) LiftSelection(duplicate bool)         { c.Sprite.LiftSelection(duplicate) }
+func (c *Controller) MoveFloatingTo(x, y int)              { c.Sprite.MoveFloatingTo(x, y) }
+func (c *Controller) CommitFloatingSelection()             { c.Sprite.CommitFloatingSelection() }
+
+func (c *Controller) ClearSelection() {
+	c.Sprite.ClearSelection()
+	c.setStatus("Deselected")
+}
+func (c *Controller) CopySelectionToClipboard() {
+	c.Sprite.CopySelectionToClipboard()
+	c.setStatus("Selection copied")
+}
+func (c *Controller) HasSelectionClipboard() bool { return c.Sprite.HasSelectionClipboard() }
+func (c *Controller) PasteSelectionClipboard() {
+	c.Sprite.PasteSelectionClipboard()
+	c.setStatus("Selection pasted")
+}
+func (c *Controller) ClearSelectionArea() {
+	c.Sprite.ClearSelectionArea()
+	c.setStatus("Selection cleared")
+}
+func (c *Controller) FloatingAt(lx, ly int) bool { return c.Sprite.FloatingAt(lx, ly) }
+func (c *Controller) ClearFrame()                { c.Sprite.ClearFrame() }
 
 // ClearFrameBitmap clears only the selected frame's pixels, preserving colour.
 func (c *Controller) ClearFrameBitmap() {
@@ -369,8 +445,20 @@ func (c *Controller) ClearFrameBitmap() {
 }
 
 // FlipH / FlipV / Invert / Rotate90 transform the selected frame.
-func (c *Controller) FlipH()  { c.Sprite.FlipH(); c.setStatus("Flipped horizontally") }
-func (c *Controller) FlipV()  { c.Sprite.FlipV(); c.setStatus("Flipped vertically") }
+func (c *Controller) FlipH() { c.Sprite.FlipH(); c.setStatus("Flipped horizontally") }
+func (c *Controller) FlipV() { c.Sprite.FlipV(); c.setStatus("Flipped vertically") }
+func (c *Controller) FlipSelectionH() {
+	c.Sprite.FlipSelectionH()
+	c.setStatus("Flipped selection horizontally")
+}
+func (c *Controller) FlipSelectionV() {
+	c.Sprite.FlipSelectionV()
+	c.setStatus("Flipped selection vertically")
+}
+func (c *Controller) RotateSelection90() {
+	c.Sprite.RotateSelection90()
+	c.setStatus("Rotated selection")
+}
 func (c *Controller) Invert() { c.Sprite.Invert(); c.setStatus("Inverted pixels") }
 
 // Rotate90 rotates the selected frame 90 degrees clockwise. When resize is true
@@ -486,6 +574,38 @@ func (c *Controller) InsertAndPasteAfter(i int) {
 	c.Sprite.PasteFrame()
 	c.setStatus("Frame inserted and pasted (" + strconv.Itoa(c.Sprite.FrameCount()) + ")")
 }
+
+// --- undo/redo ---------------------------------------------------------
+
+// Checkpoint saves the sprite's current state onto the undo stack. Callers
+// must invoke this once per discrete user action — a button press, or the
+// start of a paint-drag gesture — never once per primitive edit, or a
+// single brushstroke would exhaust the whole undo window one pixel at a
+// time.
+func (c *Controller) Checkpoint() { c.Sprite.Checkpoint() }
+
+// Undo reverts to the most recently checkpointed state.
+func (c *Controller) Undo() {
+	if c.Sprite.Undo() {
+		c.setStatus("Undo")
+	} else {
+		c.setStatus("Nothing to undo")
+	}
+}
+
+// Redo re-applies the most recently undone state.
+func (c *Controller) Redo() {
+	if c.Sprite.Redo() {
+		c.setStatus("Redo")
+	} else {
+		c.setStatus("Nothing to redo")
+	}
+}
+
+// CanUndo and CanRedo report whether Undo/Redo would currently do anything —
+// for the GUI to grey out the corresponding controls.
+func (c *Controller) CanUndo() bool { return c.Sprite.CanUndo() }
+func (c *Controller) CanRedo() bool { return c.Sprite.CanRedo() }
 
 // --- animation player ------------------------------------------------------
 

@@ -1,14 +1,18 @@
 # ZENIMATE
 
-A painting and animation tool for ZX Spectrum sprites, with a
-graphical editor and a matching terminal editor over a shared core.
+A painting and animation tool for ZX Spectrum sprites.
+
+On macOS, Cmd works wherever Ctrl+ is shown below for save, open,
+undo, redo, copy and paste. Ctrl and Option are interchangeable
+for the paint-attribute and rotate-resize modifiers, wherever
+those are shown as "Ctrl/Option".
 
 
 ## Painting
 
   Left-click / drag    set pixels (draw)
   Right-click / drag   clear pixels (erase)
-  Ctrl + paint         stamp the current ink/paper/bright onto a
+  Ctrl/Option + paint  stamp the current ink/paper/bright onto a
                        cell (plain painting edits only the bitmap)
 
 In Spectrum Colour mode the palette swatches choose the drawing
@@ -37,18 +41,50 @@ look on a Spectrum.
   + / -            add / remove a frame
   frame buttons    select a frame
   Play / Stop      run the animation
-  Copy / paste     duplicate a frame's contents
+  Copy / paste     duplicate a frame's contents (also Ctrl+C / Ctrl+V)
 
 Onion-skinning shows neighbouring frames faintly behind the
 current one to help line up movement.
 
 
+## Transforms
+
+  H FLIP          mirror the current frame left-to-right
+  V FLIP          mirror the current frame top-to-bottom
+  ROT 90          rotate the current frame 90 degrees clockwise
+  Ctrl/Option +   also resize a non-square frame so nothing is
+    ROT 90        clipped, instead of rotating in place
+  INVERT          flip every pixel of the current frame (colour
+                  is untouched)
+
+Flips carry both pixels and per-cell colour together, so the
+picture and its colouring always move as one.
+
+
+## Undo and redo
+
+  Ctrl+Z          undo the last action
+  Ctrl+Shift+Z    redo
+
+Undo covers painting, transforms, resizing, and frame changes
+(add, remove, insert, duplicate, move, clear, reset, paste), up
+to 100 levels back. A single paint stroke counts as one action,
+however many pixels it touches.
+
+
 ## Sizing
 
-  W -8 / W +8     shrink / grow width by one character cell (8px)
-  H -8 / H +8     shrink / grow height by one character cell
-  Full Screen     size to the full Spectrum screen
-  Reset           clear all frames
+  W -1 / W +1     shrink / grow width by one character cell (8px)
+  H -1 / H +1     shrink / grow height by one character cell
+  32x24           size to the full Spectrum screen
+  2x2             size to the smallest sprite (2x2 cells)
+
+
+## Clearing
+
+  CLS             clear the current frame's pixels (colour kept)
+  RESET           clear every frame and restore default size and
+                  frame count (asks for typed confirmation)
 
 
 ## File operations

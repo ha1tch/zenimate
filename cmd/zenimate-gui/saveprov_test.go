@@ -33,7 +33,7 @@ func TestSaveFileSourceOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("saved file is not a valid animation: %v", err)
 	}
-	if !s.Frame(0)[3*24+3] {
+	if !s.Frame(0).At(3, 3, 24) {
 		t.Error("saved file lost pixel (3,3)")
 	}
 }
@@ -93,7 +93,7 @@ func TestSaveIntoSourceBundleRoundTrip(t *testing.T) {
 		t.Fatalf("bundle now has %d entries, want 2", b2.Len())
 	}
 	kn, _ := b2.Sprite("knight")
-	if !kn.Frame(0)[5*24+5] {
+	if !kn.Frame(0).At(5, 5, 24) {
 		t.Error("edit did not persist into the bundle")
 	}
 	var knightLabel string

@@ -7,4 +7,4 @@
 package version
 
 // Version is the current zenimate version, synced from the VERSION file.
-const Version = "0.6.1"
+const Version = "0.7.0"

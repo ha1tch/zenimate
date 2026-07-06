@@ -1,11 +1,15 @@
 // Package model holds the sprite editor's data model. It is deliberately free of
 // any UI, rendering, or assembly-format concern: it knows only about a fixed
 // number of animation frames, each a rectangular grid of on/off pixels, plus a
-// sprite name and the currently selected frame. Frontends (TUI, GUI) observe it
+// sprite name and the currently selected frame. Frontends observe it
 // through a change callback and drive it through its methods.
 //
-// Pixel storage is row-major: index = y*Width + x, matching the original
-// browser editor so exported data is byte-identical.
+// Pixel storage is packed one bit per pixel (Frame is []byte), flat row-major
+// bit index = y*Width+x — see Frame's doc comment. This is purely an in-memory
+// detail: on-disk formats (ZCUT, screen dumps) are handled by the external
+// zentools/pkg/scr package via its own []bool Ink type, converted pixel by
+// pixel in zcut.go/screenload.go, so the exported bytes are unaffected by how
+// zenimate stores frames internally.
 package model
 
 // DefaultFrames is the initial number of animation frames. The frame count is
@@ -43,9 +47,49 @@ const (
 	MaxHeight = MaxCellsH * Cell
 )
 
-// Frame is one animation frame: a row-major grid of on/off pixels of the model's
-// current Width x Height.
-type Frame []bool
+// Frame is one animation frame: a bitmap of on/off pixels for the model's
+// current Width x Height, packed one bit per pixel — 8 pixels per byte, flat
+// row-major bit index = y*Width+x, no row padding (sprite width is always
+// cell-aligned to a multiple of 8, so none is needed). Use At/Set/Toggle to
+// access individual pixels; never index Frame directly.
+type Frame []byte
+
+// framePackedLen returns the packed byte length for a w x h bitmap.
+func framePackedLen(w, h int) int { return (w*h + 7) / 8 }
+
+// newFrame returns a fresh, fully-cleared frame for a w x h bitmap.
+func newFrame(w, h int) Frame { return make(Frame, framePackedLen(w, h)) }
+
+// At reports whether pixel (x,y) is set, given the frame's width w.
+func (f Frame) At(x, y, w int) bool {
+	i := y*w + x
+	return f[i/8]&(1<<uint(i%8)) != 0
+}
+
+// Set forces pixel (x,y) to v, given the frame's width w.
+func (f Frame) Set(x, y, w int, v bool) {
+	i := y*w + x
+	if v {
+		f[i/8] |= 1 << uint(i%8)
+	} else {
+		f[i/8] &^= 1 << uint(i%8)
+	}
+}
+
+// Toggle flips pixel (x,y), given the frame's width w.
+func (f Frame) Toggle(x, y, w int) {
+	i := y*w + x
+	f[i/8] ^= 1 << uint(i%8)
+}
+
+// invert flips every pixel in the frame: a plain byte-wise NOT. Any unused
+// bits past the last real pixel (when w*h isn't a multiple of 8) are never
+// read by At, so flipping them alongside the real ones is harmless.
+func (f Frame) invert() {
+	for i := range f {
+		f[i] = ^f[i]
+	}
+}
 
 // clone returns an independent copy of the frame.
 func (f Frame) clone() Frame {
@@ -70,6 +114,10 @@ type Sprite struct {
 	// attrRows. Attributes are per-frame, so frames can carry different colours.
 	frameAttrs         [][]byte
 	attrCols, attrRows int
+
+	selection selectionState // current rectangular selection, if any; see selection.go
+
+	undoState // embedded: promotes undoMu/undoStack/redoStack; see undo.go
 
 	onChange func()
 }
@@ -167,7 +215,7 @@ func (s *Sprite) At(x, y int) bool {
 	if x < 0 || y < 0 || x >= s.width || y >= s.height {
 		return false
 	}
-	return s.frames[s.selected][y*s.width+x]
+	return s.frames[s.selected].At(x, y, s.width)
 }
 
 // --- mutations -------------------------------------------------------------
@@ -209,7 +257,7 @@ func (s *Sprite) AddFrame() bool {
 	if len(s.frames) >= MaxFrames {
 		return false
 	}
-	s.frames = append(s.frames, make(Frame, s.width*s.height))
+	s.frames = append(s.frames, newFrame(s.width, s.height))
 	m := make([]byte, s.attrCols*s.attrRows)
 	for i := range m {
 		m[i] = DefaultAttr
@@ -248,7 +296,7 @@ func (s *Sprite) InsertFrameAt(i int) bool {
 	if i > len(s.frames) {
 		i = len(s.frames)
 	}
-	blank := make(Frame, s.width*s.height)
+	blank := newFrame(s.width, s.height)
 	attr := make([]byte, s.attrCols*s.attrRows)
 	for j := range attr {
 		attr[j] = DefaultAttr
@@ -349,7 +397,7 @@ func (s *Sprite) Set(x, y int, on bool) {
 	if x < 0 || y < 0 || x >= s.width || y >= s.height {
 		return
 	}
-	s.frames[s.selected][y*s.width+x] = on
+	s.frames[s.selected].Set(x, y, s.width, on)
 	s.notify()
 }
 
@@ -359,8 +407,7 @@ func (s *Sprite) Toggle(x, y int) {
 	if x < 0 || y < 0 || x >= s.width || y >= s.height {
 		return
 	}
-	idx := y*s.width + x
-	s.frames[s.selected][idx] = !s.frames[s.selected][idx]
+	s.frames[s.selected].Toggle(x, y, s.width)
 	s.notify()
 }
 
@@ -376,7 +423,7 @@ func (s *Sprite) CopyFrame() {
 // and attributes). It is a no-op when the clipboard is empty or its size no
 // longer matches the grid.
 func (s *Sprite) PasteFrame() {
-	if s.clipboard == nil || len(s.clipboard) != s.width*s.height {
+	if s.clipboard == nil || len(s.clipboard) != framePackedLen(s.width, s.height) {
 		return
 	}
 	s.frames[s.selected] = s.clipboard.clone()
@@ -388,7 +435,7 @@ func (s *Sprite) PasteFrame() {
 
 // ClearFrame empties the selected frame and resets its attributes to default.
 func (s *Sprite) ClearFrame() {
-	s.frames[s.selected] = make(Frame, s.width*s.height)
+	s.frames[s.selected] = newFrame(s.width, s.height)
 	m := s.frameAttrs[s.selected]
 	for i := range m {
 		m[i] = DefaultAttr
@@ -399,7 +446,7 @@ func (s *Sprite) ClearFrame() {
 // ClearFrameBitmap clears only the pixels of the selected frame, leaving its
 // per-cell attributes (colour) untouched. Used where colour must be preserved.
 func (s *Sprite) ClearFrameBitmap() {
-	s.frames[s.selected] = make(Frame, s.width*s.height)
+	s.frames[s.selected] = newFrame(s.width, s.height)
 	s.notify()
 }
 
@@ -410,10 +457,10 @@ func (s *Sprite) ClearFrameBitmap() {
 func (s *Sprite) FlipH() {
 	w, h := s.width, s.height
 	f := s.frames[s.selected]
-	nf := make(Frame, w*h)
+	nf := newFrame(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			nf[y*w+(w-1-x)] = f[y*w+x]
+			nf.Set(w-1-x, y, w, f.At(x, y, w))
 		}
 	}
 	s.frames[s.selected] = nf
@@ -435,10 +482,10 @@ func (s *Sprite) FlipH() {
 func (s *Sprite) FlipV() {
 	w, h := s.width, s.height
 	f := s.frames[s.selected]
-	nf := make(Frame, w*h)
+	nf := newFrame(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			nf[(h-1-y)*w+x] = f[y*w+x]
+			nf.Set(x, h-1-y, w, f.At(x, y, w))
 		}
 	}
 	s.frames[s.selected] = nf
@@ -458,10 +505,7 @@ func (s *Sprite) FlipV() {
 // Invert flips every pixel of the selected frame. Attributes (colour) are left
 // unchanged — only the bitmap is inverted.
 func (s *Sprite) Invert() {
-	f := s.frames[s.selected]
-	for i := range f {
-		f[i] = !f[i]
-	}
+	s.frames[s.selected].invert()
 	s.notify()
 }
 
@@ -492,16 +536,16 @@ func (s *Sprite) Rotate90(resize bool) {
 	offX := (dstW - srcH) / 2 // 0 when resizing (dstW==srcH)
 	offY := (dstH - srcW) / 2 // 0 when resizing (dstH==srcW)
 
-	nf := make(Frame, dstW*dstH)
+	nf := newFrame(dstW, dstH)
 	for y := 0; y < srcH; y++ {
 		for x := 0; x < srcW; x++ {
-			if !src[y*srcW+x] {
+			if !src.At(x, y, srcW) {
 				continue
 			}
 			nx := (srcH - 1 - y) + offX
 			ny := x + offY
 			if nx >= 0 && ny >= 0 && nx < dstW && ny < dstH {
-				nf[ny*dstW+nx] = true
+				nf.Set(nx, ny, dstW, true)
 			}
 		}
 	}
@@ -588,10 +632,10 @@ func (s *Sprite) SetSize(w, h int) {
 	s.attrCols, s.attrRows = newCols, newRows
 
 	for i := range s.frames {
-		nf := make(Frame, w*h)
+		nf := newFrame(w, h)
 		for y := 0; y < copyH; y++ {
 			for x := 0; x < copyW; x++ {
-				nf[y*w+x] = oldFrames[i][y*oldW+x]
+				nf.Set(x, y, w, oldFrames[i].At(x, y, oldW))
 			}
 		}
 		s.frames[i] = nf
@@ -623,9 +667,8 @@ func (s *Sprite) SetHeight(h int) { s.SetSize(s.width, h) }
 // --- helpers ---------------------------------------------------------------
 
 func (s *Sprite) resetFrames() {
-	n := s.width * s.height
 	for i := range s.frames {
-		s.frames[i] = make(Frame, n)
+		s.frames[i] = newFrame(s.width, s.height)
 	}
 }
 

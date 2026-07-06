@@ -2,12 +2,14 @@ package main
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guidraw"
 	"github.com/ha1tch/zenimate/pkg/zenui"
 )
 
-// fpRenderer adapts the bdfText/raylib drawing surface to zenui.Renderer.
+// fpRenderer adapts the guidraw.BDFText/raylib drawing surface to zenui.Renderer.
 type fpRenderer struct {
-	txt *bdfText
+	txt *guidraw.BDFText
 }
 
 func fpColor(c zenui.Colour) rl.Color { return rl.NewColor(c.R, c.G, c.B, c.A) }
@@ -39,11 +41,12 @@ func (r fpRenderer) ClipEnd() { rl.EndScissorMode() }
 // cares about are edge-triggered via IsKeyPressed.
 func fpInput() zenui.Input {
 	in := zenui.Input{
-		MouseX:       int(rl.GetMouseX()),
-		MouseY:       int(rl.GetMouseY()),
-		MouseDown:    rl.IsMouseButtonDown(rl.MouseLeftButton),
-		MousePressed: rl.IsMouseButtonPressed(rl.MouseLeftButton),
-		WheelY:       rl.GetMouseWheelMove(),
+		MouseX:            int(rl.GetMouseX()),
+		MouseY:            int(rl.GetMouseY()),
+		MouseDown:         rl.IsMouseButtonDown(rl.MouseLeftButton),
+		MousePressed:      rl.IsMouseButtonPressed(rl.MouseLeftButton),
+		MouseRightPressed: rl.IsMouseButtonPressed(rl.MouseRightButton),
+		WheelY:            rl.GetMouseWheelMove(),
 	}
 	for {
 		ch := rl.GetCharPressed()
@@ -62,6 +65,8 @@ func fpInput() zenui.Input {
 		{rl.KeyBackspace, zenui.KeyBackspace},
 		{rl.KeyUp, zenui.KeyUp},
 		{rl.KeyDown, zenui.KeyDown},
+		{rl.KeyLeft, zenui.KeyLeft},
+		{rl.KeyRight, zenui.KeyRight},
 		{rl.KeyPageUp, zenui.KeyPageUp},
 		{rl.KeyPageDown, zenui.KeyPageDown},
 		{rl.KeyTab, zenui.KeyTab},
@@ -78,16 +83,17 @@ func fpInput() zenui.Input {
 // zenimate's look.
 func fpTheme() zenui.Theme {
 	cv := func(c rl.Color) zenui.Colour { return zenui.Colour{R: c.R, G: c.G, B: c.B, A: c.A} }
+	dt := guidraw.DefaultTheme()
 	t := zenui.DefaultTheme()
-	t.Panel = cv(colBtn)
-	t.Sidebar = cv(colBG)
-	t.SideText = cv(colText)
-	t.Border = cv(colVPBorder)
-	t.Text = cv(colText)
-	t.DimText = cv(colDim)
-	t.DirText = cv(colYellow)
-	t.Button = cv(colBtn)
-	t.ButtonHot = cv(colBtnHot)
-	t.ButtonText = cv(colText)
+	t.Panel = cv(dt.Btn)
+	t.Sidebar = cv(dt.BG)
+	t.SideText = cv(dt.Text)
+	t.Border = cv(dt.VPBorder)
+	t.Text = cv(dt.Text)
+	t.DimText = cv(dt.Dim)
+	t.DirText = cv(dt.Yellow)
+	t.Button = cv(dt.Btn)
+	t.ButtonHot = cv(dt.BtnHot)
+	t.ButtonText = cv(dt.Text)
 	return t
 }

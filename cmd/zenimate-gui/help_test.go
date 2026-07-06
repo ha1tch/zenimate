@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guidraw"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/zenui"
 )
@@ -68,20 +69,20 @@ func TestHelpModalClickOutsideCloses(t *testing.T) {
 func TestChequerShade(t *testing.T) {
 	base := rl.NewColor(0xb0, 0xb0, 0xb0, 0xff)
 	// White mode: two notches darker.
-	w := shadeChequer(base, ui.BitmapWhite)
+	w := guidraw.ShadeChequer(base, ui.BitmapWhite)
 	if w.R >= base.R {
 		t.Error("Bitmap White chequer should be darker")
 	}
-	if int(base.R)-int(w.R) != 2*chequerNotch {
-		t.Errorf("white shade delta = %d, want %d", int(base.R)-int(w.R), 2*chequerNotch)
+	if int(base.R)-int(w.R) != 2*guidraw.ChequerNotch {
+		t.Errorf("white shade delta = %d, want %d", int(base.R)-int(w.R), 2*guidraw.ChequerNotch)
 	}
 	// Black mode: two notches lighter.
-	b := shadeChequer(base, ui.BitmapBlack)
+	b := guidraw.ShadeChequer(base, ui.BitmapBlack)
 	if b.R <= base.R {
 		t.Error("Bitmap Black chequer should be lighter")
 	}
-	if int(b.R)-int(base.R) != 2*chequerNotch {
-		t.Errorf("black shade delta = %d, want %d", int(b.R)-int(base.R), 2*chequerNotch)
+	if int(b.R)-int(base.R) != 2*guidraw.ChequerNotch {
+		t.Errorf("black shade delta = %d, want %d", int(b.R)-int(base.R), 2*guidraw.ChequerNotch)
 	}
 }
 

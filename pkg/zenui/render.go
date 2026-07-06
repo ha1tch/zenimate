@@ -46,6 +46,8 @@ const (
 	KeyBackspace
 	KeyUp
 	KeyDown
+	KeyLeft
+	KeyRight
 	KeyPageUp
 	KeyPageDown
 	KeyTab
@@ -55,10 +57,11 @@ const (
 // to the dialog. Pressed-style fields are edge-triggered (true only on the frame
 // the event occurred); MouseDown is level-triggered.
 type Input struct {
-	MouseX, MouseY int
-	MouseDown      bool // left button held
-	MousePressed   bool // left button went down this frame
-	WheelY         float32
+	MouseX, MouseY    int
+	MouseDown         bool // left button held
+	MousePressed      bool // left button went down this frame
+	MouseRightPressed bool // right button went down this frame
+	WheelY            float32
 
 	// Chars are the printable runes typed this frame (for the filename field).
 	Chars []rune

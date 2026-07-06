@@ -4,7 +4,6 @@
 #   * purego (default here): cgo-free, no system GL headers needed to build.
 #   * cgo:    needs system dev libraries (see README) but is the normal runtime
 #             path on a desktop.
-# The TUI has no external dependencies.
 
 VERSION := $(shell tr -d ' \t\r\n' < VERSION)
 DIST    := dist
@@ -22,15 +21,9 @@ help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'
 	@echo
 
-## build: build both frontends into $(DIST)
+## build: build the GUI frontend into $(DIST)
 .PHONY: build
-build: build-tui build-gui
-
-## build-tui: build the terminal frontend
-.PHONY: build-tui
-build-tui:
-	@mkdir -p $(DIST)
-	$(GO) build -o $(DIST)/zenimate-tui ./cmd/zenimate-tui/
+build: build-gui
 
 ## build-gui: build the raylib frontend (cgo-free purego path)
 .PHONY: build-gui
@@ -58,7 +51,7 @@ race:
 ## vet: run go vet on all packages (GUI uses the purego tag)
 .PHONY: vet
 vet:
-	$(GO) vet ./pkg/... ./internal/... ./cmd/zenimate-tui/ ./cmd/zaniplay/
+	$(GO) vet ./pkg/... ./internal/...
 	CGO_ENABLED=0 $(GO) vet -tags $(GUITAGS) ./cmd/zenimate-gui/
 
 ## fmt: gofmt the whole tree in place
@@ -72,13 +65,11 @@ fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt would change:"; echo "$$out"; exit 1; fi
 	@echo "gofmt clean"
 
-## cross: cross-compile every frontend for all release target platforms (to /dev/null)
+## cross: cross-compile the GUI for all release target platforms (to /dev/null)
 .PHONY: cross
 cross:
 	@for p in darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do \
 		os=$${p%/*}; arch=$${p#*/}; \
-		GOOS=$$os GOARCH=$$arch $(GO) build -o /dev/null ./cmd/zenimate-tui/  && echo "ok  tui  $$p"; \
-		GOOS=$$os GOARCH=$$arch $(GO) build -o /dev/null ./cmd/zaniplay/      && echo "ok  play $$p"; \
 		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -tags $(GUITAGS) -o /dev/null ./cmd/zenimate-gui/ && echo "ok  gui  $$p"; \
 	done
 

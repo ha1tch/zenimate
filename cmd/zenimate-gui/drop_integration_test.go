@@ -26,7 +26,7 @@ func TestHandleDropLoadsZCUT(t *testing.T) {
 	if c.Sprite.Width() != 24 || c.Sprite.Height() != 24 {
 		t.Fatalf("drop did not load zcut: sprite is %dx%d", c.Sprite.Width(), c.Sprite.Height())
 	}
-	if !c.Sprite.Frame(0)[3*24+3] {
+	if !c.Sprite.Frame(0).At(3, 3, 24) {
 		t.Error("dropped sprite lost pixel (3,3)")
 	}
 }

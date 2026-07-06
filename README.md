@@ -7,20 +7,14 @@ animation. Sprites can be any size up to a full screen (32×24 character cells,
 
 ![zenimate](zenimate.png)
 
-There are two frontends over one shared, UI-agnostic core:
-
-- **`zenimate-tui`** — a terminal editor. Ordinary UTF-8 text for labels; the
-  sprite grid is drawn with Unicode half-blocks. No third-party terminal library.
-- **`zenimate-gui`** — a raylib desktop editor. Every on-screen character is
-  rendered from the bundled Sinclair ZX Spectrum bitmap font, so the UI text is
-  period-correct.
-
-A third command, **`zaniplay`**, plays animations in the terminal.
+**`zenimate-gui`** is a raylib desktop editor. Every on-screen character is
+rendered from the bundled Sinclair ZX Spectrum bitmap font, so the UI text is
+period-correct.
 
 ## Quick start
 
 ```
-make build      # both editor frontends into dist/
+make build      # the GUI into dist/
 ```
 
 Requires Go 1.25 or later. `make build-gui` builds the GUI cgo-free (no system
@@ -29,8 +23,8 @@ to list all targets.
 
 ## Documentation
 
-- **[docs/GUIDE.md](docs/GUIDE.md)** — building, the full TUI and GUI controls,
-  the file formats, zaniplay, the code layout, and CI/releases.
+- **[docs/GUIDE.md](docs/GUIDE.md)** — building, the full GUI controls, the
+  file formats, the code layout, and CI/releases.
 
 ## Licence
 

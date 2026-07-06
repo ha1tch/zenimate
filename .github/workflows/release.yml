@@ -44,7 +44,7 @@ jobs:
           printf '%s' "$VERSION" > VERSION
           bash scripts/syncver.sh
 
-      - name: Build all three frontends
+      - name: Build the GUI
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -55,9 +55,7 @@ jobs:
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
           out="dist/zenimate-${GOOS}-${GOARCH}"
           mkdir -p "$out"
-          # TUI and zaniplay are plain Go; the GUI is cgo-free via the purego tag.
-          go build -o "${out}/zenimate-tui${ext}"  ./cmd/zenimate-tui/
-          go build -o "${out}/zaniplay${ext}"      ./cmd/zaniplay/
+          # Cgo-free via the purego tag.
           CGO_ENABLED=0 go build -tags purego -o "${out}/zenimate-gui${ext}" ./cmd/zenimate-gui/
           cp README.md CHANGELOG.md LICENSE "$out"/ 2>/dev/null || true
 

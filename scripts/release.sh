@@ -5,7 +5,7 @@
 #   1. Validate the VERSION string and the matching CHANGELOG entry
 #   2. Sync VERSION -> pkg/version
 #   3. gofmt + go vet (the formatting/static gate)
-#   4. Build both frontends (TUI native; GUI via the cgo-free purego path)
+#   4. Build the GUI frontend (cgo-free purego path)
 #   5. Run the full test suite, including the race detector
 #   6. Stage a versioned checkpoint zip under dist/
 #
@@ -40,12 +40,10 @@ if [[ -n "$fmtout" ]]; then
 	exit 1
 fi
 echo "==> go vet"
-go vet ./pkg/... ./internal/... ./cmd/zenimate-tui/
+go vet ./pkg/... ./internal/...
 
-# 4. Build both frontends.
+# 4. Build the GUI frontend.
 mkdir -p dist
-echo "==> build TUI"
-go build -o "dist/zenimate-tui" ./cmd/zenimate-tui/
 echo "==> build GUI (purego, cgo-free)"
 CGO_ENABLED=0 go build -tags purego -o "dist/zenimate-gui" ./cmd/zenimate-gui/
 

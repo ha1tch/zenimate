@@ -126,3 +126,44 @@ func TestOnionTogglesDefaultOff(t *testing.T) {
 		t.Fatal("second toggle should turn off")
 	}
 }
+
+func TestPaintClipsToActiveSelection(t *testing.T) {
+	c := New(16, 16)
+	c.SetSelection(2, 2, 5, 5) // bounds (2,2,3,3)
+
+	c.Paint(10, 10, true) // well outside the selection
+	if c.Sprite.At(10, 10) {
+		t.Error("Paint outside the active selection should be clipped (a no-op)")
+	}
+
+	c.Paint(3, 3, true) // inside the selection
+	if !c.Sprite.At(3, 3) {
+		t.Error("Paint inside the active selection should work normally")
+	}
+}
+
+func TestPaintUnaffectedWithNoSelection(t *testing.T) {
+	c := New(16, 16)
+	c.Paint(10, 10, true)
+	if !c.Sprite.At(10, 10) {
+		t.Error("Paint with no active selection should work anywhere, unclipped")
+	}
+}
+
+func TestPaintAttrClipsToActiveSelection(t *testing.T) {
+	c := New(16, 16)
+	c.SetSelection(0, 0, 7, 7) // bounds (0,0,8,8): exactly the first attribute cell
+	c.SetInk(3)
+
+	beforeOutside := c.Sprite.AttrCell(1, 1) // the SECOND cell, outside the selection
+	c.PaintAttr(9, 9)                        // clicked pixel is in cell (1,1), outside selection
+	if c.Sprite.AttrCell(1, 1) != beforeOutside {
+		t.Error("PaintAttr outside the active selection should be clipped (a no-op)")
+	}
+
+	beforeInside := c.Sprite.AttrCell(0, 0) // the first cell, inside the selection
+	c.PaintAttr(3, 3)                       // inside the selection, cell (0,0)
+	if c.Sprite.AttrCell(0, 0) == beforeInside {
+		t.Error("PaintAttr inside the active selection should still work normally")
+	}
+}

@@ -19,10 +19,10 @@ func TestLoadSCRRoundTrip(t *testing.T) {
 	if back.Width() != 256 || back.Height() != 192 {
 		t.Fatalf("loaded screen is %dx%d, want 256x192", back.Width(), back.Height())
 	}
-	if !back.Frame(0)[0] {
+	if !back.Frame(0).At(0, 0, 256) {
 		t.Error("pixel (0,0) lost")
 	}
-	if !back.Frame(0)[8*256+15] {
+	if !back.Frame(0).At(15, 8, 256) {
 		t.Error("pixel (15,8) lost")
 	}
 	if back.AttrCellFrame(0, 0, 0) != 0x45 {
@@ -40,14 +40,14 @@ func TestLoadScreenFromTAPandSNA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tap: %v", err)
 	}
-	if !tapSprite.Frame(0)[3*256+2] {
+	if !tapSprite.Frame(0).At(2, 3, 256) {
 		t.Error("tap screen lost pixel (2,3)")
 	}
 	snaSprite, err := LoadScreenFromSnapshot(snaImg, "sna")
 	if err != nil {
 		t.Fatalf("sna: %v", err)
 	}
-	if !snaSprite.Frame(0)[3*256+2] {
+	if !snaSprite.Frame(0).At(2, 3, 256) {
 		t.Error("sna screen lost pixel (2,3)")
 	}
 }
@@ -60,7 +60,7 @@ func TestLoadScreenFromZ80(t *testing.T) {
 	if err != nil {
 		t.Fatalf("z80: %v", err)
 	}
-	if !sprite.Frame(0)[5*256+5] {
+	if !sprite.Frame(0).At(5, 5, 256) {
 		t.Error("z80 screen lost pixel (5,5)")
 	}
 }
@@ -73,7 +73,7 @@ func TestLoadScreenFromTZX(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tzx: %v", err)
 	}
-	if !sprite.Frame(0)[7*256+7] {
+	if !sprite.Frame(0).At(7, 7, 256) {
 		t.Error("tzx screen lost pixel (7,7)")
 	}
 }

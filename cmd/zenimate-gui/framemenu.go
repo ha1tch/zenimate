@@ -45,16 +45,21 @@ func newFrameMenu(c *ui.Controller, anchor zenui.Rect) *zenui.Menu {
 func applyFrameMenuPick(c *ui.Controller, idx, i int) {
 	switch idx {
 	case frameMenuInsert:
+		c.Checkpoint()
 		c.InsertFrameAfter(i)
 	case frameMenuDuplicate:
+		c.Checkpoint()
 		c.DuplicateFrameAt(i)
 	case frameMenuCopy:
 		c.CopyFrame()
 	case frameMenuPaste:
+		c.Checkpoint()
 		c.PasteFrame()
 	case frameMenuInsertPaste:
+		c.Checkpoint()
 		c.InsertAndPasteAfter(i)
 	case frameMenuDelete:
+		c.Checkpoint()
 		c.DeleteFrameAt(i)
 	}
 }

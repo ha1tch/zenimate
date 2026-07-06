@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/zenui"
@@ -37,7 +38,7 @@ func newFitChooser(c *ui.Controller, data []byte, name string) *fitChooser {
 	}
 	items := make([]zenui.Item, len(options))
 	for i, o := range options {
-		items[i] = zenui.Item{Label: upper(o.label)}
+		items[i] = zenui.Item{Label: guiutil.Upper(o.label)}
 	}
 	return &fitChooser{
 		ctrl:    c,

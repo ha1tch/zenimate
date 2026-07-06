@@ -41,7 +41,7 @@ func (s *Sprite) frameAsset(f int, name string) scr.Asset {
 	for y := 0; y < s.height; y++ {
 		row := make([]bool, s.width)
 		for x := 0; x < s.width; x++ {
-			row[x] = fr[y*s.width+x]
+			row[x] = fr.At(x, y, s.width)
 		}
 		a.Ink[y] = row
 	}
@@ -98,13 +98,13 @@ func LoadZCUT(data []byte) (*Sprite, error) {
 		if len(a.Ink) != h {
 			return nil, fmt.Errorf("zcut: frame %d bitmap has %d rows, want %d", f, len(a.Ink), h)
 		}
-		fr := make(Frame, w*h)
+		fr := newFrame(w, h)
 		for y := 0; y < h; y++ {
 			if len(a.Ink[y]) != w {
 				return nil, fmt.Errorf("zcut: frame %d row %d has %d px, want %d", f, y, len(a.Ink[y]), w)
 			}
 			for x := 0; x < w; x++ {
-				fr[y*w+x] = a.Ink[y][x]
+				fr.Set(x, y, w, a.Ink[y][x])
 			}
 		}
 		s.frames[f] = fr

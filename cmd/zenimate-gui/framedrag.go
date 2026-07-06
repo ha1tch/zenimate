@@ -4,6 +4,9 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guidraw"
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 )
 
 // dragMoveThreshold is the pointer movement, in pixels, past which a
@@ -99,29 +102,29 @@ func dragPulseScale(pulse float32) float32 {
 // drawFrameDrag renders the insertion line at the current drop gap and a
 // small pulsating badge showing the dragged frame's label, following the
 // pointer. Call only while drag.active.
-func drawFrameDrag(txt *bdfText, l layout, d frameDrag, mx, my int) {
-	gap := frameDropGap(l.frameRects, float32(mx))
+func drawFrameDrag(txt *guidraw.BDFText, l guidraw.Layout, d frameDrag, mx, my int) {
+	gap := frameDropGap(l.FrameRects, float32(mx))
 
 	// Insertion line: a bright vertical line spanning the frame strip height,
 	// at the gap boundary (start of the strip if before frame 0, end of the
 	// last button if past the last).
-	lineX := float32(l.frameStripX)
-	if n := len(l.frameRects); n > 0 {
+	lineX := float32(l.FrameStripX)
+	if n := len(l.FrameRects); n > 0 {
 		switch {
 		case gap <= 0:
-			lineX = l.frameRects[0].X
+			lineX = l.FrameRects[0].X
 		case gap >= n:
-			r := l.frameRects[n-1]
+			r := l.FrameRects[n-1]
 			lineX = r.X + r.Width
 		default:
-			lineX = l.frameRects[gap].X
+			lineX = l.FrameRects[gap].X
 		}
 	}
-	rl.DrawRectangle(int32(lineX)-1, int32(l.frameStripY), 2, int32(frameBtnH), rl.Yellow)
+	rl.DrawRectangle(int32(lineX)-1, int32(l.FrameStripY), 2, int32(frameBtnH), rl.Yellow)
 
 	// Ghost badge: the source frame's label, pulsating, offset from the cursor
 	// so it doesn't sit directly under the pointer.
-	label := "F" + itoa(d.source+1)
+	label := "F" + guiutil.Itoa(d.source+1)
 	scale := 2
 	w := txt.Measure(label, scale)
 	h := txt.CellH() * scale

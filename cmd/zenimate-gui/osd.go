@@ -4,6 +4,8 @@ import (
 	"math/rand"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guidraw"
 )
 
 // OSD shows status messages as an animated on-screen caption: each new message
@@ -121,7 +123,7 @@ func (o *osd) alpha() float32 {
 // draw renders the caption and its sparks, anchored to the bottom-right corner.
 // (anchorX, anchorY) is the bottom-right point the caption rises from (the
 // window's bottom-right inner corner). txt draws the text; tw/th measure it.
-func (o *osd) draw(txt *bdfText, anchorX, anchorY int, tw, th int) {
+func (o *osd) draw(txt *guidraw.BDFText, anchorX, anchorY int, tw, th int) {
 	if !o.active {
 		return
 	}

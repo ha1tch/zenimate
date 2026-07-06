@@ -1,15 +1,14 @@
 # zenimate — intro guide
 
-A fuller tour of zenimate than the README: how to build it, how to drive both
-frontends, the file formats it reads and writes, and how the code is layered. For
-a one-paragraph overview and the quick build, see the [README](../README.md).
+A fuller tour of zenimate than the README: how to build it, how to drive the
+GUI, the file formats it reads and writes, and how the code is layered. For a
+one-paragraph overview and the quick build, see the [README](../README.md).
 
 ## Building
 
 ```
 make            # show all targets
-make build      # both frontends into dist/
-make build-tui  # terminal frontend only
+make build      # the GUI into dist/
 make build-gui  # raylib frontend, cgo-free (purego) — no system GL headers needed
 ```
 
@@ -34,38 +33,6 @@ display; building it does not.
 
 ## Controls
 
-### TUI
-
-The TUI mirrors the GUI's three view modes and edits the bitmap plane while being
-colour-aware. It displays attributes and can stamp colour, but never destroys
-colour unintentionally: clearing pixels keeps colour, and the colour-wiping clear
-and reset ask for confirmation.
-
-| Key | Action |
-|-----|--------|
-| arrows / `hjkl` | move cursor |
-| `tab` | cycle view mode (Bitmap Black / White / Spectrum Colour) |
-| space | set pixel (draw); in colour-paint mode, stamp ink+paper |
-| backspace / del | clear pixel (erase) |
-| enter | toggle pixel |
-| `i` / `o` | decrease / increase selected ink colour (0–7) |
-| `I` / `O` | decrease / increase selected paper colour (0–7) |
-| `b` | toggle bright for painting |
-| `m` | toggle colour-paint mode |
-| `[` `]` | previous / next frame |
-| `1`..`9` | jump to frame |
-| `+` / `-` | add / remove a frame (1–16) |
-| `p` | play / stop animation |
-| `c` / `v` | copy / paste frame |
-| `x` | clear pixels (keeps colour) |
-| `X` | clear pixels **and** colour (asks to confirm) |
-| `R` | reset all frames (asks to confirm) |
-| `w` `W` / `t` `T` | shrink/grow width, shrink/grow height by one cell |
-| `S` / `L` | save to / load from a `.zani` file (prompts for a name) |
-| `q` | quit |
-
-### GUI
-
 Left-drag paints, right-drag erases. Panning uses **space as a modifier** (hold
 space and left-drag) or a **middle-mouse-button drag**; either pans the viewport.
 The **mouse wheel zooms** in and out toward the cursor. Both zoom and pan carry
@@ -73,13 +40,19 @@ glide-after-release inertia. **Enter** toggles play/stop; `[` `]` and `1`..`9`
 change frame. Esc does not close the window.
 
 The frame strip runs along the top, with a **scrubber slider** above it (drag to
-move between frames) and **`-` / `+` buttons** to add or remove frames (1–16). The
-bottom buttons include **32x24** (the full 32×24-cell screen) and **2x2** size
-presets, per-cell **width/height steppers** (±1 cell each way), reset, play/stop,
-and separate **copy** and **paste** frame buttons. Sizing is **non-destructive** —
-existing pixels and attributes are preserved — and the viewport animates to fit
-the whole sprite when the size changes. Sprites can be any size up to 32×24
-character cells (256×192 px).
+move between frames) and **`-` / `+` buttons** to add or remove frames (1–16).
+**Right-click** a frame button for its context menu (Insert empty frame,
+Duplicate frame, Copy frame, Paste frame, Insert and paste, Delete frame); items
+disable themselves at the frame-count bounds and when the clipboard is empty.
+**Press and hold, then drag** a frame button past a small movement threshold to
+reorder it: a pulsating badge follows the pointer and an insertion line shows
+where it will land; release inside the strip to drop, or press Escape to cancel.
+The bottom buttons include **32x24** (the full 32×24-cell screen) and **2x2**
+size presets, per-cell **width/height steppers** (±1 cell each way), reset,
+play/stop, and separate **copy** and **paste** frame buttons. Sizing is
+**non-destructive** — existing pixels and attributes are preserved — and the
+viewport animates to fit the whole sprite when the size changes. Sprites can be
+any size up to 32×24 character cells (256×192 px).
 
 Three **view modes** sit in a row under the frame strip:
 
@@ -89,11 +62,17 @@ Three **view modes** sit in a row under the frame strip:
 - **Spectrum Colour** — uses ZX attributes: set pixels show the cell's ink
   colour, clear pixels its paper colour. A vertical **16-swatch palette** (8
   colours × normal/bright) appears: **left-click** a swatch to pick ink,
-  **right-click** to pick paper. **Hold Ctrl and paint** to stamp the current
-  ink/paper/bright onto a cell (painting without Ctrl only edits the bitmap). A
-  faint per-virtual-pixel grid shows at ≥50% zoom. Attributes are per 8×8
-  character cell (hardware-accurate) and **per frame**; copy/paste-frame carries
-  them.
+  **right-click** to pick paper. **Hold Ctrl (or Option) and paint** to stamp
+  the current ink/paper/bright onto a cell (painting without the modifier only
+  edits the bitmap). A faint per-virtual-pixel grid shows at ≥50% zoom.
+  Attributes are per 8×8 character cell (hardware-accurate) and **per frame**;
+  copy/paste-frame carries them.
+
+Four **transform** buttons act on the selected frame: **H FLIP** and **V
+FLIP** mirror pixels and per-cell colour together; **ROT 90** rotates
+clockwise in place, or — holding **Ctrl or Option** — also swaps a non-square
+frame's dimensions so nothing is clipped; **INVERT** flips every pixel
+(colour is untouched).
 
 In the bitmap views, two **onion-skin** toggles overlay neighbouring frames as
 translucent silhouettes: the previous frame in red, the next in green (wrapping
@@ -117,16 +96,22 @@ last pixel you edited. **Right-click** the preview to cycle the zoom. **Press an
 hold** (left button) to unfurl a full-sprite popup that grows out of the preview
 box — anchored to its top-right corner — and shrinks back on release.
 
+**Undo and redo** cover painting, transforms, resizing, and frame changes (add,
+remove, insert, duplicate, move, clear, reset, paste) up to 100 levels back — a
+whole paint stroke counts as one action, however many pixels it touches.
+
 File operations sit on the bottom button row and on shortcuts: **Ctrl+O** opens
 (a sprite, animation, screen, image, or a bundle to browse into); **Ctrl+S**
 saves back to the current source; **Ctrl+Shift+S** is Save As; **Ctrl+E** exports
 the current frame to a Spectrum format; **Ctrl+Shift+E** adds the sprite to a
 bundle; **Ctrl+F** toggles the save-extension form between long (`.zani`/`.zbun`)
-and 8.3 (`.zan`/`.zbu`). Files can also be **dragged onto the window**: a sprite,
-animation, screen or image loads directly, and a dropped bundle opens the browser
-so you can pick an animation. The title block shows the current source
-(`name.zani`, `name - bundle.zbun`, or `name (unsaved)`) so it is always clear
-what Save will write to.
+and 8.3 (`.zan`/`.zbu`); **Ctrl+Z** undoes, **Ctrl+Shift+Z** redoes;
+**Ctrl+C**/**Ctrl+V** copy/paste the selected frame. On macOS, **Cmd** works
+wherever **Ctrl** is shown for all of the above. Files can also be **dragged
+onto the window**: a sprite, animation, screen or image loads directly, and a
+dropped bundle opens the browser so you can pick an animation. The title block
+shows the current source (`name.zani`, `name - bundle.zbun`, or `name
+(unsaved)`) so it is always clear what Save will write to.
 
 The **HELP** button (or **F1**) opens a scrollable reader listing all the
 shortcuts and explaining the file formats; scroll with the wheel, arrows,
@@ -162,32 +147,20 @@ new sprite prompts for a destination. **Ctrl+Shift+S** is Save As and always
 prompts. The title block shows the current source so it is always clear what Save
 will write to.
 
-### zaniplay
-
-`cmd/zaniplay` is a standalone terminal player for animations. It renders in
-colour using half-block characters:
-
-```
-zaniplay [-fps N] [-once] file.zani
-zaniplay [-fps N] [-once] game.zbun#knight   # one animation from a bundle
-```
-
 ## Design
-
-The pieces are layered so the two frontends share everything but presentation:
 
 ```
 pkg/bdf          standalone BDF font reader + rasteriser (no project deps)
 pkg/zxpalette    ZX Spectrum palette + attribute encoding (cloned from zenzx)
-pkg/filepick     renderer-agnostic file Open/Save dialog widget (stdlib only)
+pkg/zenui        renderer-agnostic UI toolkit (stdlib only): the file dialog,
+                 the frame context menu, and every chooser modal share one
+                 Renderer/Input contract and one Status lifecycle
 pkg/version      build version, synced from VERSION
 internal/fonts   embedded Sinclair + Cozette faces (decoded via pkg/bdf)
 internal/model   the sprite document: variable frames, dims, per-frame
                  per-cell attributes, edits, observer hook
 internal/ui      the frontend-independent controller
-cmd/zenimate-tui terminal frontend
 cmd/zenimate-gui raylib frontend (text via pkg/bdf only)
-cmd/zaniplay     standalone terminal animation player
 ```
 
 `pkg/bdf` is the reusable BDF font system: it was lifted from the subterm
@@ -202,10 +175,9 @@ GitHub Actions builds, vets, and tests on every push and pull request. Because
 the GUI uses raylib-go's cgo-free purego path, every binary cross-compiles from a
 single Linux runner with no per-platform toolchains.
 
-Pushing a `v*` tag (for example `v0.6.0`) triggers the release workflow, which
-cross-compiles all three frontends (`zenimate-gui`, `zenimate-tui`, `zaniplay`)
-for each platform, bundles them per platform, and publishes a GitHub Release with
-the archives attached. Release platforms:
+Pushing a `v*` tag (for example `v0.6.1`) triggers the release workflow, which
+cross-compiles the GUI for each platform, bundles it, and publishes a GitHub
+Release with the archives attached. Release platforms:
 
 - Linux amd64 and arm64 (arm64 covers 64-bit Raspberry Pi OS on the Pi 3B and
   later; the purego GUI has no 32-bit ARM support)
@@ -213,11 +185,14 @@ the archives attached. Release platforms:
 - Windows amd64
 
 Dependencies are ordinary published modules fetched from the Go proxy at build
-time (the file-dialog widget lives in-tree at `pkg/filepick`), so CI needs no
-vendored tree. The release version is taken from the tag and written through the
+time (the UI toolkit lives in-tree at `pkg/zenui`), so CI needs no vendored
+tree. The release version is taken from the tag and written through the
 `VERSION` file and `scripts/syncver.sh`, keeping the compiled-in version
 consistent with the tag.
 
-Note: the purego GUI loads the raylib shared library at runtime, so a target
-machine needs libraylib available; the TUI and `zaniplay` have no such
-dependency.
+Note: the purego GUI embeds the raylib runtime for its target platform inside
+the compiled binary at build time and extracts it to a local cache on first
+run, rather than loading a separate system-installed raylib library — a
+released binary needs no additional runtime install beyond the OS's own
+graphics stack (X11/GLX and a GL implementation on Linux; the equivalent is
+already present on macOS and Windows).

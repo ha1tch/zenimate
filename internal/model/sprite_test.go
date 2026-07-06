@@ -9,12 +9,14 @@ func TestNewDimensionsAndEmpty(t *testing.T) {
 	}
 	for i := 0; i < DefaultFrames; i++ {
 		f := s.Frame(i)
-		if len(f) != 16*16 {
-			t.Fatalf("frame %d len = %d, want 256", i, len(f))
+		if len(f) != framePackedLen(16, 16) {
+			t.Fatalf("frame %d packed len = %d, want %d", i, len(f), framePackedLen(16, 16))
 		}
-		for _, on := range f {
-			if on {
-				t.Fatalf("frame %d should start empty", i)
+		for y := 0; y < 16; y++ {
+			for x := 0; x < 16; x++ {
+				if f.At(x, y, 16) {
+					t.Fatalf("frame %d should start empty", i)
+				}
 			}
 		}
 	}
@@ -443,5 +445,64 @@ func TestCopyPasteFrameCarriesAttributes(t *testing.T) {
 	s.PasteFrame()
 	if s.AttrCellFrame(3, 0, 0) != 0x29 {
 		t.Errorf("pasted frame attr = %#x, want 0x29", s.AttrCellFrame(3, 0, 0))
+	}
+}
+
+// TestFramePackedBits exercises Frame's own bit-packing math directly, rather
+// than only indirectly through Sprite at dimensions that happen to be
+// byte-aligned. 3x3 = 9 bits deliberately straddles a byte boundary (bit 7 is
+// the last bit of byte 0, bit 8 is the first bit of byte 1).
+func TestFramePackedBits(t *testing.T) {
+	f := newFrame(3, 3)
+	if got, want := len(f), 2; got != want { // ceil(9/8) = 2 bytes
+		t.Fatalf("newFrame(3,3) packed len = %d, want %d", got, want)
+	}
+
+	// Every pixel starts clear.
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			if f.At(x, y, 3) {
+				t.Fatalf("(%d,%d) should start clear", x, y)
+			}
+		}
+	}
+
+	// Set a distinct pattern straddling the byte boundary: (1,2) is bit index
+	// 2*3+1=7 (last bit of byte 0); (2,2) is bit index 8 (first bit of byte 1).
+	f.Set(1, 2, 3, true)
+	f.Set(2, 2, 3, true)
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			want := (x == 1 && y == 2) || (x == 2 && y == 2)
+			if got := f.At(x, y, 3); got != want {
+				t.Errorf("(%d,%d) = %v, want %v", x, y, got, want)
+			}
+		}
+	}
+
+	// Toggle flips, twice returns to the original state.
+	f.Toggle(0, 0, 3)
+	if !f.At(0, 0, 3) {
+		t.Error("toggle should have set (0,0)")
+	}
+	f.Toggle(0, 0, 3)
+	if f.At(0, 0, 3) {
+		t.Error("second toggle should have cleared (0,0)")
+	}
+
+	// Set(false) clears without disturbing a neighbouring bit in the same byte.
+	f.Set(1, 2, 3, false)
+	if f.At(1, 2, 3) {
+		t.Error("(1,2) should be clear after Set(false)")
+	}
+	if !f.At(2, 2, 3) {
+		t.Error("clearing (1,2) should not disturb (2,2) in the same byte")
+	}
+
+	// clone() is independent of the original.
+	c := f.clone()
+	c.Set(0, 1, 3, true)
+	if f.At(0, 1, 3) {
+		t.Error("mutating the clone should not affect the original")
 	}
 }

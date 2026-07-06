@@ -32,7 +32,7 @@ func TestZCUTFileRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.Frame(0)[1*24+1] {
+	if !loaded.Frame(0).At(1, 1, 24) {
 		t.Error("pixel (1,1) lost through file round-trip")
 	}
 	if loaded.AttrCellFrame(0, 0, 0) != 0x45 {

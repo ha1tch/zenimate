@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/zenui"
 )
@@ -34,7 +35,7 @@ func newSaveProvChooser(c *ui.Controller, src ui.SpriteSource) *saveProvChooser 
 	}
 	items := make([]zenui.Item, len(options))
 	for i, o := range options {
-		items[i] = zenui.Item{Label: upper(o.label)}
+		items[i] = zenui.Item{Label: guiutil.Upper(o.label)}
 	}
 	return &saveProvChooser{
 		ctrl:    c,
@@ -42,7 +43,7 @@ func newSaveProvChooser(c *ui.Controller, src ui.SpriteSource) *saveProvChooser 
 		options: options,
 		panel: zenui.NewOptionPanel(zenui.OptionPanelConfig{
 			Title:    "SAVE ANIMATION",
-			Subtitle: upper("\"" + src.Entry + "\" came from a bundle"),
+			Subtitle: guiutil.Upper("\"" + src.Entry + "\" came from a bundle"),
 			Options:  items,
 		}),
 	}

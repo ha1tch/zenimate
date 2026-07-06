@@ -40,8 +40,8 @@ func TestGuideAtSpritePixel8(t *testing.T) {
 		// A guide's screen-x is gridX + spriteCol*cell — a multiple of the cell
 		// size away from the grid origin, i.e. exactly on a sprite-pixel edge.
 		for _, x := range cols {
-			gx := l.gridX + x*l.cell
-			if (gx-l.gridX)%l.cell != 0 {
+			gx := l.GridX + x*l.Cell
+			if (gx-l.GridX)%l.Cell != 0 {
 				t.Errorf("guide at sprite col %d not aligned to a sprite-pixel edge", x)
 			}
 		}

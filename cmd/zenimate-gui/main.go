@@ -3,7 +3,7 @@
 // live preview, and action buttons, driving the shared ui.Controller.
 //
 // All on-screen text is rendered through the bundled Sinclair ZX Spectrum BDF
-// font via the bdfText renderer (pkg/bdf -> raylib textures). raylib's own font
+// font via the guidraw.BDFText renderer (pkg/bdf -> raylib textures). raylib's own font
 // API is never used.
 //
 // The window needs an OpenGL-capable display, so this binary runs on a desktop
@@ -16,6 +16,8 @@ import (
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guidraw"
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 	"github.com/ha1tch/zenimate/internal/fonts"
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
@@ -36,7 +38,9 @@ const (
 
 	pad        = 16
 	cellPx     = 20  // editor pixel size on screen
-	previewBox = 168 // fixed detail-preview box size in window pixels
+	previewBox = 162 // fixed detail-preview box size in window pixels — matches the
+	// ToolPalette/attribute-palette column width (4 cols x 36px + 3x6px gaps) so
+	// all three share the same left AND right edge, not just an incidental overlap
 
 	frameBtnW = 56
 	frameBtnH = 28
@@ -46,128 +50,25 @@ const (
 	btnW   = 120
 	btnH   = 32
 	btnGap = 10
+
+	// doubleClickWindow is the maximum gap, in seconds, between two clicks
+	// on the hand tool button for it to count as a double-click (re-fit
+	// the viewport) rather than two independent single clicks.
+	doubleClickWindow = 0.4
 )
-
-// ZX-ish palette.
-var (
-	colBG       = rl.NewColor(0x10, 0x10, 0x18, 0xff)
-	colGridArea = rl.NewColor(0x2c, 0x2c, 0x38, 0xff) // lighter backing behind the sprite grid
-	colGrid     = rl.NewColor(0x30, 0x30, 0x40, 0xff)
-	colInk      = rl.NewColor(0xff, 0xff, 0xff, 0xff)
-	colSel      = rl.NewColor(0x00, 0x80, 0x00, 0xff)
-	colBtn      = rl.NewColor(0x28, 0x28, 0x34, 0xff)
-	colBtnHot   = rl.NewColor(0x3a, 0x3a, 0x4a, 0xff)
-	colYellow   = rl.NewColor(0xff, 0xd0, 0x00, 0xff)
-	colText     = rl.NewColor(0xe0, 0xe0, 0xe8, 0xff)
-	colDim      = rl.NewColor(0x80, 0x80, 0x90, 0xff) // dimmer subtitle / secondary text
-	colGuide    = rl.NewColor(0x40, 0x40, 0x40, 0xff) // dark grey: 8-pixel character-cell guides
-	colVPBorder = rl.NewColor(0x6a, 0x6a, 0x78, 0xff) // medium grey: viewport box border
-	colPixGrid  = rl.NewColor(0x00, 0x00, 0x00, 0x28) // almost-invisible 1px grid (Spectrum mode)
-
-	// Translucent onion-skin silhouettes: previous frame red, next frame green.
-	colOnionPrev = rl.NewColor(0xff, 0x30, 0x30, 0x70)
-	colOnionNext = rl.NewColor(0x30, 0xff, 0x30, 0x70)
-
-	// Photoshop-style transparency chequer for empty cells: one square per
-	// virtual pixel (8x8 squares per character cell), alternating these greys.
-	colChkLight = rl.NewColor(0xb0, 0xb0, 0xb0, 0xff)
-	colChkDark  = rl.NewColor(0x88, 0x88, 0x88, 0xff)
-)
-
-// zxColor converts a zxpalette colour to a raylib colour.
-func zxColor(n color.NRGBA) rl.Color {
-	return rl.NewColor(n.R, n.G, n.B, n.A)
-}
-
-type button struct {
-	x, y, w, h int
-	label      string
-	action     func()
-}
-
-func (b button) hit(mx, my int) bool {
-	return mx >= b.x && mx < b.x+b.w && my >= b.y && my < b.y+b.h
-}
-
-// rectHit reports whether (mx,my) falls within an rl.Rectangle.
-func rectHit(r rl.Rectangle, mx, my int) bool {
-	return float32(mx) >= r.X && float32(mx) < r.X+r.Width &&
-		float32(my) >= r.Y && float32(my) < r.Y+r.Height
-}
-
-// layout holds every interactive region for the current window size, computed
-// once per frame so drawing and hit-testing always agree. The window is
-// resizable, so all coordinates derive from the live screen dimensions rather
-// than fixed constants.
-type layout struct {
-	winW, winH int
-
-	// Title block (top-left). When collapsed it shrinks to a small button; the
-	// toolbars expand to fill the reclaimed width and the viewport gains vertical
-	// room. titleRect is the click target that toggles collapse.
-	titleRect      rl.Rectangle
-	titleCollapsed bool    // true past the halfway point of the collapse
-	titleCollapse  float32 // eased collapse progress (0 = expanded, 1 = collapsed)
-
-	// Horizontal frame strip near the top (mirrors the TUI's frame row), one
-	// rect per current frame, with +/- buttons to its right.
-	frameStripX, frameStripY int
-	scrubRect                rl.Rectangle // frame scrubber slider above the strip
-	frameRects               []rl.Rectangle
-	addFrameRect             rl.Rectangle
-	removeFrameRect          rl.Rectangle
-	helpRect                 rl.Rectangle
-
-	// Editor grid.
-	gridX, gridY int
-	gridW, gridH int // the box the grid is clipped to (base fit size)
-	cell         int // adaptive on-screen pixel size of one Spectrum cell
-
-	// View-mode buttons (Bitmap White / Bitmap Black / Spectrum Colour).
-	modeButtons []button
-
-	// Tiny LED toggles centred below the Bitmap White / Bitmap Black buttons that
-	// switch the transparency chequer on/off for that mode.
-	chkLedWhite rl.Rectangle
-	chkLedBlack rl.Rectangle
-
-	// Onion-skin toggle buttons (bitmap modes only).
-	onionButtons []button
-
-	// Attribute palette (shown in Spectrum Colour mode): 16 swatches in a 4x4
-	// grid (8 base colours, each as a normal+bright pair). swatchBase/swatchBright
-	// map each swatch rect to the colour it represents, so layout and hit-testing
-	// stay in sync regardless of the on-screen ordering.
-	paletteX, paletteY int
-	swatchW, swatchH   int
-	swatchRects        [16]rl.Rectangle
-	swatchBase         [16]int
-	swatchBright       [16]bool
-
-	// Preview (top-right corner) — fixed size, independent of sprite dimensions.
-	previewX, previewY int
-	previewW, previewH int
-
-	// Action buttons across the bottom, in a sliding drawer.
-	buttons         []button
-	stripBtnW       int          // effective strip button width (shrinks in narrow windows)
-	drawerToggle    rl.Rectangle // small triangle that opens/closes the drawer
-	drawerToggleHit rl.Rectangle // larger clickable area around the triangle
-	drawerOpen      float32      // 0 = closed, 1 = open (current eased progress)
-}
 
 // computeLayout builds the layout for the given window size and controller. The
 // button actions are bound to the controller here. The editor cell size adapts
 // to the space between the frame strip and the button block so the grid always
 // fits, whatever the window size and sprite dimensions.
-func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse float32, drawerOpen float32) layout {
-	var l layout
-	l.winW, l.winH = w, h
-	l.titleCollapse = titleCollapse
+func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse float32, drawerOpen float32) guidraw.Layout {
+	var l guidraw.Layout
+	l.WinW, l.WinH = w, h
+	l.TitleCollapse = titleCollapse
 	// Past the halfway point the block reads as collapsed (drives the Z vs full
 	// text and the height that the header budget uses).
-	l.titleCollapsed = titleCollapse >= 0.5
-	l.drawerOpen = drawerOpen
+	l.TitleCollapsed = titleCollapse >= 0.5
+	l.DrawerOpen = drawerOpen
 
 	// Title block, top-left. Expanded it carries "ZENIMATE" + subtitle + the
 	// size/frame header at titleW wide; collapsed it shrinks to a small button.
@@ -179,13 +80,13 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	const collapsedH = 28
 	curW := float32(titleW) + (float32(collapsedW)-float32(titleW))*titleCollapse
 	curH := titleH
-	if l.titleCollapsed {
+	if l.TitleCollapsed {
 		curH = collapsedH
 	}
-	l.titleRect = rl.NewRectangle(pad, pad, curW, float32(curH))
+	l.TitleRect = rl.NewRectangle(pad, pad, curW, float32(curH))
 
 	// Toolbars begin to the right of the title block and run to the window edge.
-	toolX := int(l.titleRect.X+l.titleRect.Width) + 20
+	toolX := int(l.TitleRect.X+l.TitleRect.Width) + 20
 	toolRight := w - pad
 	toolW := toolRight - toolX
 	if toolW < 200 {
@@ -215,17 +116,16 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	if fbw < 24 {
 		fbw = 24
 	}
-	l.frameStripX = toolX
-	l.frameStripY = row1Y
-	l.frameRects = make([]rl.Rectangle, nf)
+	l.FrameStripX = toolX
+	l.FrameStripY = row1Y
+	l.FrameRects = make([]rl.Rectangle, nf)
 	for i := 0; i < nf; i++ {
-		fx := l.frameStripX + i*(fbw+frameGap)
-		l.frameRects[i] = rl.NewRectangle(float32(fx), float32(row1Y),
+		fx := l.FrameStripX + i*(fbw+frameGap)
+		l.FrameRects[i] = rl.NewRectangle(float32(fx), float32(row1Y),
 			float32(fbw), float32(frameBtnH))
 	}
-	rx := float32(l.frameStripX + nf*(fbw+frameGap))
-	l.removeFrameRect = rl.NewRectangle(rx, float32(row1Y), float32(small), float32(frameBtnH))
-	l.addFrameRect = rl.NewRectangle(rx+float32(small)+6, float32(row1Y), float32(small), float32(frameBtnH))
+	rx := float32(l.FrameStripX + nf*(fbw+frameGap))
+	l.AddFrameRect = rl.NewRectangle(rx, float32(row1Y), float32(small), float32(frameBtnH))
 
 	// Scrubber track: a thin slider spanning the frame buttons (not the +/-),
 	// sitting just above them. Dragging it selects a frame proportionally.
@@ -236,7 +136,7 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	if scrubW < fbw {
 		scrubW = fbw
 	}
-	l.scrubRect = rl.NewRectangle(float32(l.frameStripX), float32(scrubY),
+	l.ScrubRect = rl.NewRectangle(float32(l.FrameStripX), float32(scrubY),
 		float32(scrubW), float32(scrubH))
 
 	// HELP button: fixed at its startup position, directly below where the '-' and
@@ -244,9 +144,9 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	// NOT track the live frame strip: adding frames moves '+'/'-' rightward, but
 	// HELP stays put where it was on startup. Width spans the '-'-to-'+' gap
 	// (2*small + 6). Height matches the onion/mode buttons.
-	helpAnchorX := float32(l.frameStripX + model.DefaultFrames*(frameBtnW+frameGap))
+	helpAnchorX := float32(l.FrameStripX + model.DefaultFrames*(frameBtnW+frameGap))
 	helpW := 2*float32(small) + 6
-	l.helpRect = rl.NewRectangle(helpAnchorX, float32(row1Y)+float32(frameBtnH)+6,
+	l.HelpRect = rl.NewRectangle(helpAnchorX, float32(row1Y)+float32(frameBtnH)+6,
 		helpW, float32(modeBtnH))
 
 	// Bottom button strip, as a sliding drawer. Two rows: actions and file
@@ -280,7 +180,7 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 			ebtnGap = 2
 		}
 	}
-	l.stripBtnW = ebtnW // remembered so draw can pick 1- vs 2-line labels
+	l.StripBtnW = ebtnW // remembered so draw can pick 1- vs 2-line labels
 
 	stripBandH := drawerRows*btnH + (drawerRows-1)*8 // rows + inter-row gaps
 	slide := int(float32(stripBandH+pad) * (1 - drawerOpen))
@@ -299,16 +199,16 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	// RESET is destructive (whole animation) and asks for typed confirmation; CLS
 	// clears only the current frame and needs no confirmation.
 	rcW := (ebtnW - cpInnerGap) / 2
-	l.buttons = []button{
-		{row(0), byMid, rcW, btnH, "RESET", func() { resetRequested = true }},
-		{row(0) + rcW + cpInnerGap, byMid, rcW, btnH, "CLS", c.ClearFrameCLS},
-		{row(1), byMid, ebtnW, btnH, "Play/Stop", c.TogglePlay},
-		{cpLeftX, byMid, cpW, btnH, "Copy", c.CopyFrame},
-		{cpRightX, byMid, cpW, btnH, "Paste", c.PasteFrame},
-		{row(0), byBottom, ebtnW, btnH, "Open", func() { files.startOpen(c) }},
-		{row(1), byBottom, ebtnW, btnH, "Save", func() { files.save(c) }},
-		{cpLeftX, byBottom, cpW, btnH, "Export", func() { files.startExport(c) }},
-		{cpRightX, byBottom, cpW, btnH, "Bundle", func() { files.startBundleExport(c) }},
+	l.Buttons = []guidraw.Button{
+		{X: row(0), Y: byMid, W: rcW, H: btnH, Label: "RESET", Action: func() { resetRequested = true }},
+		{X: row(0) + rcW + cpInnerGap, Y: byMid, W: rcW, H: btnH, Label: "CLS", Action: func() { c.Checkpoint(); c.ClearFrameCLS() }},
+		{X: row(1), Y: byMid, W: ebtnW, H: btnH, Label: "Play/Stop", Action: c.TogglePlay},
+		{X: cpLeftX, Y: byMid, W: cpW, H: btnH, Label: "Copy", Action: c.CopyFrame},
+		{X: cpRightX, Y: byMid, W: cpW, H: btnH, Label: "Paste", Action: func() { c.Checkpoint(); c.PasteFrame() }},
+		{X: row(0), Y: byBottom, W: ebtnW, H: btnH, Label: "Open", Action: func() { files.startOpen(c) }},
+		{X: row(1), Y: byBottom, W: ebtnW, H: btnH, Label: "Save", Action: func() { files.save(c) }},
+		{X: cpLeftX, Y: byBottom, W: cpW, H: btnH, Label: "Export", Action: func() { files.startExport(c) }},
+		{X: cpRightX, Y: byBottom, W: cpW, H: btnH, Label: "Bundle", Action: func() { files.startBundleExport(c) }},
 	}
 
 	// Sizing area, occupying the old column-3 slot onward. Left sub-column holds
@@ -319,30 +219,56 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	szW := (ebtnW - szInnerGap) / 2
 	presetX := row(3)
 	szX := presetX + szW + szInnerGap // steppers sit right of the presets
-	l.buttons = append(l.buttons,
+	l.Buttons = append(l.Buttons,
 		// Preset sizes (left sub-column).
-		button{presetX, byMid, szW, btnH, "32x24", func() { c.SetSize(model.MaxWidth, model.MaxHeight) }},
-		button{presetX, byBottom, szW, btnH, "2x2", func() { c.SetSize(2*model.Cell, 2*model.Cell) }},
+		guidraw.Button{X: presetX, Y: byMid, W: szW, H: btnH, Label: "32x24", Action: func() { c.Checkpoint(); c.SetSize(model.MaxWidth, model.MaxHeight) }},
+		guidraw.Button{X: presetX, Y: byBottom, W: szW, H: btnH, Label: "2x2", Action: func() { c.Checkpoint(); c.SetSize(2*model.Cell, 2*model.Cell) }},
 		// Per-cell width/height steppers (right 2x2 block); labels in cell units.
-		button{szX, byMid, szW, btnH, "W -1", func() { resizeCells(c, -1, 0) }},
-		button{szX + szW + szInnerGap, byMid, szW, btnH, "W +1", func() { resizeCells(c, +1, 0) }},
-		button{szX, byBottom, szW, btnH, "H -1", func() { resizeCells(c, 0, -1) }},
-		button{szX + szW + szInnerGap, byBottom, szW, btnH, "H +1", func() { resizeCells(c, 0, +1) }},
+		guidraw.Button{X: szX, Y: byMid, W: szW, H: btnH, Label: "W -1", Action: func() { resizeCells(c, -1, 0) }},
+		guidraw.Button{X: szX + szW + szInnerGap, Y: byMid, W: szW, H: btnH, Label: "W +1", Action: func() { resizeCells(c, +1, 0) }},
+		guidraw.Button{X: szX, Y: byBottom, W: szW, H: btnH, Label: "H -1", Action: func() { resizeCells(c, 0, -1) }},
+		guidraw.Button{X: szX + szW + szInnerGap, Y: byBottom, W: szW, H: btnH, Label: "H +1", Action: func() { resizeCells(c, 0, +1) }},
 	)
 
 	// Transform group: a 2x2 block of small buttons to the right of the steppers.
 	// H FLIP / V FLIP on the top row, ROT 90 / INVERT on the bottom. ROT 90
 	// rotates in place; holding Ctrl also resizes a non-square frame so nothing is
-	// clipped.
+	// clipped. All three act on the active selection instead of the whole
+	// frame when one exists — the resize-on-rotate modifier only applies to
+	// the whole-frame case, since RotateSelection90 always resizes the
+	// selection's own bounds to fit, with no clip-vs-resize choice to make.
 	txX := szX + 2*szW + szInnerGap + btnGap // one gap past the stepper block
-	l.buttons = append(l.buttons,
-		button{txX, byMid, szW, btnH, "H FLIP", c.FlipH},
-		button{txX + szW + szInnerGap, byMid, szW, btnH, "V FLIP", c.FlipV},
-		button{txX, byBottom, szW, btnH, "ROT 90", func() {
-			ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
-			c.Rotate90(ctrl)
+	l.Buttons = append(l.Buttons,
+		guidraw.Button{X: txX, Y: byMid, W: szW, H: btnH, Label: "H FLIP", Action: func() {
+			c.Checkpoint()
+			if c.HasSelection() {
+				c.FlipSelectionH()
+			} else {
+				c.FlipH()
+			}
 		}},
-		button{txX + szW + szInnerGap, byBottom, szW, btnH, "INVERT", c.Invert},
+		guidraw.Button{X: txX + szW + szInnerGap, Y: byMid, W: szW, H: btnH, Label: "V FLIP", Action: func() {
+			c.Checkpoint()
+			if c.HasSelection() {
+				c.FlipSelectionV()
+			} else {
+				c.FlipV()
+			}
+		}},
+		guidraw.Button{X: txX, Y: byBottom, W: szW, H: btnH, Label: "ROT 90", Action: func() {
+			c.Checkpoint()
+			if c.HasSelection() {
+				c.RotateSelection90()
+				return
+			}
+			// Ctrl or Option (Alt) both trigger the resize-on-rotate behaviour —
+			// Option is the conventional Mac modifier for this kind of held
+			// alternate-action gesture, Ctrl the cross-platform default.
+			resize := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) ||
+				rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+			c.Rotate90(resize)
+		}},
+		guidraw.Button{X: txX + szW + szInnerGap, Y: byBottom, W: szW, H: btnH, Label: "INVERT", Action: func() { c.Checkpoint(); c.Invert() }},
 	)
 
 	// Row 2: view-mode buttons then onion toggles, also starting at toolX. These
@@ -351,28 +277,28 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	modeY := row2Y
 	modeW := 84
 	mrow := func(i int) int { return toolX + i*(modeW+btnGap) }
-	l.modeButtons = []button{
-		{mrow(0), modeY, modeW, modeBtnH, "Bitmap White", func() { c.SetMode(ui.BitmapWhite) }},
-		{mrow(1), modeY, modeW, modeBtnH, "Bitmap Black", func() { c.SetMode(ui.BitmapBlack) }},
-		{mrow(2), modeY, modeW, modeBtnH, "Spectrum Colour", func() { c.SetMode(ui.SpectrumColour) }},
+	l.ModeButtons = []guidraw.Button{
+		{X: mrow(0), Y: modeY, W: modeW, H: modeBtnH, Label: "Bitmap White", Action: func() { c.SetMode(ui.BitmapWhite) }},
+		{X: mrow(1), Y: modeY, W: modeW, H: modeBtnH, Label: "Bitmap Black", Action: func() { c.SetMode(ui.BitmapBlack) }},
+		{X: mrow(2), Y: modeY, W: modeW, H: modeBtnH, Label: "Spectrum Colour", Action: func() { c.SetMode(ui.SpectrumColour) }},
 	}
 
 	// Tiny chequer-toggle LEDs centred below the Bitmap White / Bitmap Black
 	// buttons.
 	const ledW, ledH, ledGap = 10, 6, 3
 	ledY := float32(modeY + modeBtnH + ledGap)
-	l.chkLedWhite = rl.NewRectangle(float32(mrow(0)+(modeW-ledW)/2), ledY, ledW, ledH)
-	l.chkLedBlack = rl.NewRectangle(float32(mrow(1)+(modeW-ledW)/2), ledY, ledW, ledH)
+	l.ChkLedWhite = rl.NewRectangle(float32(mrow(0)+(modeW-ledW)/2), ledY, ledW, ledH)
+	l.ChkLedBlack = rl.NewRectangle(float32(mrow(1)+(modeW-ledW)/2), ledY, ledW, ledH)
 
 	// Onion-skin toggle buttons, fixed at their startup position: aligned to where
 	// the F6 frame button sits with the default frame count at full button width.
 	// Like the HELP button, they deliberately do NOT track the live frame strip, so
 	// adding frames (which shrinks the buttons and shifts F6) leaves them put.
 	onionW := 72
-	ox0 := l.frameStripX + 5*(frameBtnW+frameGap)
-	l.onionButtons = []button{
-		{ox0, modeY, onionW, modeBtnH, "Onion Prev", c.ToggleOnionPrev},
-		{ox0 + onionW + btnGap, modeY, onionW, modeBtnH, "Onion Next", c.ToggleOnionNext},
+	ox0 := l.FrameStripX + 5*(frameBtnW+frameGap)
+	l.OnionButtons = []guidraw.Button{
+		{X: ox0, Y: modeY, W: onionW, H: modeBtnH, Label: "Onion Prev", Action: c.ToggleOnionPrev},
+		{X: ox0 + onionW + btnGap, Y: modeY, W: onionW, H: modeBtnH, Label: "Onion Next", Action: c.ToggleOnionNext},
 	}
 
 	// The header occupies the taller of the title block and the two toolbar rows;
@@ -380,15 +306,15 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	// move up, shrinking the header and giving the viewport more vertical room.
 	toolBottom := row2Y + modeBtnH
 	headerBottom := toolBottom
-	if tb := int(l.titleRect.Y + l.titleRect.Height); tb > headerBottom {
+	if tb := int(l.TitleRect.Y + l.TitleRect.Height); tb > headerBottom {
 		headerBottom = tb
 	}
 
 	// Editor grid sits below the header; its cell size adapts so the whole grid
 	// fits the box between the header and the button block, and within the
 	// horizontal space left of the fixed preview/palette column.
-	l.gridX = pad
-	l.gridY = headerBottom + 16
+	l.GridX = pad
+	l.GridY = headerBottom + 16
 
 	// Horizontal budget: [pad | grid | pad | previewBox | pad]. The gap between
 	// the viewport and the preview column equals pad — the same margin the bottom
@@ -410,7 +336,7 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 		vb := float32(vpBottomOpen) + (float32(vpBottomClosed)-float32(vpBottomOpen))*(1-drawerOpen)
 		vpBottom = int(vb)
 	}
-	availH := vpBottom - l.gridY // room above the drawer
+	availH := vpBottom - l.GridY // room above the drawer
 
 	// Base cell size is FIXED at cellPx and never derived from window or sprite
 	// size. This is the Quag lesson: there is one persistent scale. The on-screen
@@ -420,18 +346,18 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	// done by lowering v.zoom via animateFit, not by shrinking this base, so the
 	// grid/overlay thresholds (stated in device px per virtual pixel) mean the
 	// same thing in every window size and for every sprite.
-	l.cell = cellPx
+	l.Cell = cellPx
 
 	// The grid is clipped to the available box (not the sprite-exact size), so
 	// zooming/panning stays within a stable rectangle and never overdraws the
 	// buttons or preview.
-	l.gridW = availW
-	l.gridH = availH
-	if l.gridW < 0 {
-		l.gridW = 0
+	l.GridW = availW
+	l.GridH = availH
+	if l.GridW < 0 {
+		l.GridW = 0
 	}
-	if l.gridH < 0 {
-		l.gridH = 0
+	if l.GridH < 0 {
+		l.GridH = 0
 	}
 
 	// Drawer-toggle triangle, inside the viewport's bottom-right corner (a few px
@@ -441,63 +367,78 @@ func computeLayout(w, h int, c *ui.Controller, files *fileOps, titleCollapse flo
 	// anywhere on or around the toggle activates it (and never paints).
 	const triInset = 4
 	const triPad = 6 // extra clickable margin around the triangle
-	triX := l.gridX + l.gridW - triW - triInset
-	triY := l.gridY + l.gridH - triH - triInset
-	l.drawerToggle = rl.NewRectangle(float32(triX), float32(triY), float32(triW), float32(triH))
+	triX := l.GridX + l.GridW - triW - triInset
+	triY := l.GridY + l.GridH - triH - triInset
+	l.DrawerToggle = rl.NewRectangle(float32(triX), float32(triY), float32(triW), float32(triH))
 	// Hit area: from (triX-triPad, triY-triPad) to the viewport's bottom-right.
 	hx := triX - triPad
 	hy := triY - triPad
-	l.drawerToggleHit = rl.NewRectangle(float32(hx), float32(hy),
-		float32(l.gridX+l.gridW-hx), float32(l.gridY+l.gridH-hy))
+	l.DrawerToggleHit = rl.NewRectangle(float32(hx), float32(hy),
+		float32(l.GridX+l.GridW-hx), float32(l.GridY+l.GridH-hy))
 
-	// Attribute palette: 16 swatches in a 4x4 grid, bottom-aligned to the window
-	// with the same margin as the bottom button strip. Each base colour is a
-	// normal+bright pair; the 8 base colours are laid out two-per-row in the order
-	// blue,black / red,magenta / green,cyan / yellow,white (matching the classic
-	// Spectrum colour-key arrangement).
-	l.swatchW = 36
-	l.swatchH = 24
-	const swGapX = 6
-	const swGapY = 5
-	paletteRows := 4
-	paletteCols := 4
-	paletteH := paletteRows*l.swatchH + (paletteRows-1)*swGapY
-	paletteW := paletteCols*l.swatchW + (paletteCols-1)*swGapX
-	l.paletteX = w - pad - paletteW
-	l.paletteY = (h - pad) - paletteH // bottom edge aligns with the button strip's
+	// Attribute palette anchor: bottom-aligned to the window with the same
+	// margin as the bottom button strip. The 4x4 swatch grid itself (size,
+	// classic Spectrum colour-key arrangement, hit-testing) is owned by a
+	// zenui.ZXClassicPaletteChooser; only the anchor position is computed
+	// here, since it depends on the window size computeLayout already has.
+	const (
+		paletteSwatchW, paletteSwatchH = 36, 24
+		paletteGapX, paletteGapY       = 6, 5
+		paletteCols, paletteRows       = 4, 4
+	)
+	paletteW := paletteCols*paletteSwatchW + (paletteCols-1)*paletteGapX
+	paletteH := paletteRows*paletteSwatchH + (paletteRows-1)*paletteGapY
+	l.PaletteX = w - pad - paletteW
+	l.PaletteY = (h - pad) - paletteH // bottom edge aligns with the button strip's
 
-	baseOrder := [8]int{
-		zxpalette.Blue, zxpalette.Black,
-		zxpalette.Red, zxpalette.Magenta,
-		zxpalette.Green, zxpalette.Cyan,
-		zxpalette.Yellow, zxpalette.White,
-	}
-	for i := 0; i < 16; i++ {
-		pair := i / 2       // 0..7 base-colour slot
-		within := i % 2     // 0 = normal, 1 = bright
-		pairRow := pair / 2 // 0..3
-		pairCol := pair % 2 // 0..1
-		gridCol := pairCol*2 + within
-		x := l.paletteX + gridCol*(l.swatchW+swGapX)
-		y := l.paletteY + pairRow*(l.swatchH+swGapY)
-		l.swatchRects[i] = rl.NewRectangle(float32(x), float32(y),
-			float32(l.swatchW), float32(l.swatchH))
-		l.swatchBase[i] = baseOrder[pair]
-		l.swatchBright[i] = within == 1
-	}
+	// Tool palette anchor, tucked directly above the attribute palette (same
+	// gap as everywhere else in this column) — same width as the palette
+	// below it (4 cols x 36px + 3 gaps = 162px either way), so the two grids
+	// line up visually. The grid itself is owned by a zenui.ToolPalette; only
+	// the anchor is computed here.
+	const (
+		toolBtnW, toolBtnH = 36, 36
+		toolGapX, toolGapY = 6, 5
+		toolCols, toolRows = 4, 3 // 12 tools, exactly 3 rows, no partial row
+	)
+	toolPaletteW := toolCols*toolBtnW + (toolCols-1)*toolGapX
+	toolPaletteH := toolRows*toolBtnH + (toolRows-1)*toolGapY
+	l.ToolPaletteX = w - pad - toolPaletteW
+	l.ToolPaletteY = l.PaletteY - 16 - toolPaletteH
 
-	// Fixed-size detail preview box in the top-right corner. It grows downward to
-	// meet just above the palette (with a small gap), reclaiming the vertical
-	// space the old fixed-height preview left empty.
-	l.previewX = w - pad - previewBox
-	l.previewY = l.gridY
-	l.previewW = previewBox
-	l.previewH = l.paletteY - 16 - l.previewY
-	if l.previewH < previewBox {
-		l.previewH = previewBox // never smaller than the base box
+	// Fixed-size detail preview box in the top-right corner. It grows downward
+	// to meet just above the tool palette (with a small gap), reclaiming the
+	// vertical space the old fixed-height preview left empty.
+	l.PreviewX = w - pad - previewBox
+	l.PreviewY = l.GridY
+	l.PreviewW = previewBox
+	l.PreviewH = l.ToolPaletteY - 16 - l.PreviewY
+	if l.PreviewH < previewBox {
+		l.PreviewH = previewBox // never smaller than the base box
 	}
 
 	return l
+}
+
+// attrOnLabel returns the current ATTR ON/OFF indicator's text.
+func attrOnLabel(attrOnGlobal bool) string {
+	if attrOnGlobal {
+		return "ATTR ON"
+	}
+	return "ATTR OFF"
+}
+
+// attrOnIndicatorRect computes the ATTR ON/OFF indicator's clickable rect,
+// right-aligned above the palette column. Shared by drawing and
+// click-detection so the two can't drift apart — "ATTR OFF" is a
+// character wider than "ATTR ON", so the rect's position genuinely shifts
+// with state, not just its label.
+func attrOnIndicatorRect(l guidraw.Layout, txt *guidraw.BDFText, attrOnGlobal bool) zenui.Rect {
+	label := attrOnLabel(attrOnGlobal)
+	lw := len(label) * txt.CellW()
+	lx := l.PaletteX + previewBox - lw
+	ly := l.PaletteY - 12
+	return zenui.Rect{X: lx - 2, Y: ly - 1, W: lw + 4, H: txt.CellH() + 2}
 }
 
 func main() {
@@ -505,6 +446,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	iconFont, err := fonts.ToolIcons()
+	if err != nil {
+		panic(err)
+	}
+	// The text tool's own, separately switchable font choice — distinct
+	// from `font` above, which backs all regular UI text via `txt` and must
+	// stay Sinclair regardless of what the text tool is set to.
+	textFontsList := loadTextFonts()
+	textFontIdx := 0 // Sinclair, the default
 
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 	rl.InitWindow(winW, winH, "zenimate "+version.Version)
@@ -519,18 +469,62 @@ func main() {
 	curMonitor := rl.GetCurrentMonitor()
 	setZoomRangeForScreen(rl.GetMonitorHeight(curMonitor))
 
-	txt := newBDFText(font, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	txt := guidraw.NewBDFText(font, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
 	defer txt.Unload()
+	// A second text renderer over the icon face, for the tool palette only —
+	// everything else keeps drawing through the regular Sinclair-backed txt.
+	iconTxt := guidraw.NewBDFText(iconFont, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	defer iconTxt.Unload()
 
 	c := ui.New(16, 16)
 	vp := newViewport()
 	osdNote := newOSD()
-	var files fileOps       // modal file dialog (save/open/export)
-	var help *helpModal     // scrollable help reader, when open
-	var reset *resetConfirm // typed reset confirmation, when open
+	var files fileOps         // modal file dialog (save/open/export)
+	var help *helpModal       // scrollable help reader, when open
+	var reset *resetConfirm   // typed reset confirmation, when open
 	var frameMenu *zenui.Menu // frame-strip right-click context menu, when open
-	frameMenuFrame := 0        // which frame index frameMenu was opened for
-	drag := newFrameDrag()     // frame-strip drag-to-reorder state
+	frameMenuFrame := 0       // which frame index frameMenu was opened for
+	drag := newFrameDrag()    // frame-strip drag-to-reorder state
+	palette := zenui.NewZXClassicPaletteChooser(zenui.ZXClassicPaletteChooserConfig{
+		SwatchW: 36, SwatchH: 24, GapX: 6, GapY: 5,
+	})
+	theme := guidraw.DefaultTheme()
+	preview := zenui.NewPreviewPane(zenui.PreviewPaneConfig{
+		Source: spritePreviewSource{c: c, theme: &theme}, MinZoom: 1, MaxZoom: 4,
+	})
+	preview.SetZoom(2) // matches the original fixed detail-preview default
+
+	// The tool palette, tucked between the preview box and the attribute
+	// palette. Glyphs are the 24px icon set (U+E100+i) — matching what
+	// GlyphSize below expects, and the size already chosen as looking best
+	// when these icons were first extracted. IDs are placeholders: no actual
+	// tool behaviour is wired up yet (selection, fill, shapes, etc. are all
+	// still just chrome at this point), so picking one only changes which
+	// button is highlighted.
+	toolPalette := zenui.NewToolPalette(zenui.ToolPaletteConfig{
+		Tools: []zenui.Tool{
+			{ID: "paintbrush", Glyph: 0xE101}, {ID: "select", Glyph: 0xE100},
+			{ID: "fill", Glyph: 0xE102}, {ID: "eyedropper", Glyph: 0xE103},
+			{ID: "line", Glyph: 0xE104}, {ID: "rectangle", Glyph: 0xE105},
+			{ID: "ellipse", Glyph: 0xE106}, {ID: "triangle", Glyph: 0xE107},
+			{ID: "polygon", Glyph: 0xE108}, {ID: "text", Glyph: 0xE10C},
+			{ID: "hand", Glyph: 0xE10A}, {ID: "zoom", Glyph: 0xE10B},
+		},
+		Cols: 4, ButtonW: 36, ButtonH: 36, GapX: 6, GapY: 5, GlyphSize: 24,
+	})
+
+	// Pen shape/size: applies to the paintbrush's freehand stroke only (see
+	// paintPixel's own comment on why attribute stamping stays single-pixel).
+	// Defaults to round, size 1 — identical to plain single-pixel painting
+	// until the user actively opens the options panel and changes something,
+	// so existing muscle memory isn't disturbed by this feature existing.
+	penShapeID := penShapeRound
+	penSize := 1
+	var penPanel *penOptions // nil when closed
+	var fontMenu *zenui.Menu // nil when closed
+	lastHandClickTime := float32(-1)
+	lastCtrlReleaseTime := float32(-1)
+	attrOnGlobal := false
 
 	// Track the sprite dimensions so a resize can trigger a zoom-to-fit animation.
 	lastW, lastH := c.Sprite.Width(), c.Sprite.Height()
@@ -552,10 +546,6 @@ func main() {
 		paletteFade = 1
 	}
 
-	// Press-and-hold full-preview popup progress (0 = closed, 1 = full overlay),
-	// eased toward its target each frame.
-	var popup float32
-	var previewHeld bool
 	// Title collapse: eased progress (0 = expanded, 1 = collapsed) toward a target.
 	titleCollapse := float32(0)
 	titleCollapseTarget := float32(0)
@@ -564,7 +554,41 @@ func main() {
 	// down point) and the locked axis, decided once per stroke and held.
 	strokeActive := false
 	strokeAnchorX, strokeAnchorY := 0, 0
-	strokeAxis := axisNone
+	strokeAxis := guiutil.AxisNone
+
+	// Select tool drag state: either defining a brand new selection (anchor
+	// corner held, live-updated as the drag continues) or dragging an
+	// existing selection's lifted content (offset from the click point to
+	// the selection's own origin, so the drag doesn't snap the origin to the
+	// cursor). Both moves and pastes stay floating after the drag ends,
+	// rather than auto-committing — matching Photoshop's actual behaviour of
+	// keeping pasted/moved content movable until an explicit deselect.
+	selDragging := false
+	selDraggingMove := false // true = dragging existing content; false = defining a new selection
+	selAnchorX, selAnchorY := 0, 0
+	selDragOffX, selDragOffY := 0, 0
+	// True when this drag started as a "define a new selection" attempt
+	// (not a move/duplicate) while a selection already existed — used at
+	// release to tell a genuine click (no movement) from a real drag: a
+	// plain click in that situation should deselect, not leave behind a
+	// nonsensical 1x1-pixel selection at the click point.
+	selNewAttemptHadPriorSelection := false
+
+	// Shape tools (line/rectangle/triangle) drag state: anchor pixel held
+	// from mouse-down, current end point tracked live for the preview
+	// overlay, committed to the sprite only on release.
+	shapeDragging := false
+	shapeStartX, shapeStartY := 0, 0
+	shapeEndX, shapeEndY := 0, 0
+	// Polygon tool's current side count, adjustable mid-drag via number keys
+	// 3-9 (see the polygon drag block below). Persists across drags so
+	// picking, say, an octagon once keeps it an octagon next time.
+	polygonSides := 6
+
+	// Text tool state: click starts an entry, typing appends to it, Enter
+	// commits into the sprite, Escape discards. Defaults to the Sinclair
+	// face (font, already loaded above) — font choice is a later addition.
+	var textState textEntry
 	// Last pixel painted this stroke, used to interpolate a continuous line when
 	// the pointer moves faster than one pixel per frame (otherwise fast strokes
 	// leave sparse dotted gaps).
@@ -574,7 +598,6 @@ func main() {
 	// entire hold — otherwise the viewport growing as the drawer closes would
 	// slide paintable area under a still-held cursor and draw a stray pixel.
 	toggleHeld := false
-	previewZoom := 2 // fixed detail-preview zoom factor (1..4), right-click cycles
 
 	// Bottom drawer: open by default, slides closed/open with an eased progress.
 	drawerOpen := float32(1)
@@ -594,6 +617,26 @@ func main() {
 		mx := int(rl.GetMouseX())
 		my := int(rl.GetMouseY())
 
+		// One Input snapshot per frame, reused by every consumer below.
+		// rl.GetCharPressed() (inside fpInput) destructively drains a
+		// shared, stateful character queue — calling fpInput() more than
+		// once per frame silently hands all typed characters to whichever
+		// caller happens to run first and leaves every later caller with
+		// nothing, regardless of what was actually typed. This was the
+		// real cause of the text tool appearing to do nothing: the preview
+		// pane's own unconditional per-frame fpInput() call was draining
+		// the queue before the text tool ever got a turn.
+		frameIn := fpInput()
+		// Captured once, here, before any selection-handling code this frame
+		// can commit a pending float — used by handleKeys' gate below instead
+		// of a fresh c.IsFloating() call, which would otherwise reflect
+		// state already mutated earlier in this same frame (e.g. Enter
+		// commits a floating selection via the selection-specific handling
+		// further down, then a fresh IsFloating() check later in the same
+		// frame would incorrectly see "not floating" and let handleKeys
+		// process that same Enter keypress too, also toggling Play).
+		wasFloatingThisFrame := c.IsFloating()
+
 		// Re-anchor the zoom scale if the window has moved to a different monitor
 		// (e.g. dragged to a display of a different height).
 		if m := rl.GetCurrentMonitor(); m != curMonitor {
@@ -604,6 +647,9 @@ func main() {
 		// Recompute layout from the live (resizable) window each frame.
 		l := computeLayout(rl.GetScreenWidth(), rl.GetScreenHeight(), c, &files, titleCollapse, drawerOpen)
 		s := c.Sprite
+		palette.SetBounds(zenui.Rect{X: l.PaletteX, Y: l.PaletteY})
+		toolPalette.SetBounds(zenui.Rect{X: l.ToolPaletteX, Y: l.ToolPaletteY})
+		preview.SetBounds(zenui.Rect{X: l.PreviewX, Y: l.PreviewY, W: l.PreviewW, H: l.PreviewH})
 
 		// Frame time, clamped, used by every ease this frame.
 		dt := rl.GetFrameTime()
@@ -616,21 +662,21 @@ func main() {
 		// in/out over a fixed time on resize, independent of how many resize steps
 		// the platform reports. On first sight a button snaps to its target so the
 		// initial layout doesn't fade in.
-		vpRight := l.gridX + l.gridW
-		if len(btnOpacity) != len(l.buttons) {
+		vpRight := l.GridX + l.GridW
+		if len(btnOpacity) != len(l.Buttons) {
 			// Button set changed (or first frame): (re)initialise at the target.
-			btnOpacity = make([]float32, len(l.buttons))
-			for i, b := range l.buttons {
-				if buttonVisible(b.x, b.w, vpRight) {
+			btnOpacity = make([]float32, len(l.Buttons))
+			for i, b := range l.Buttons {
+				if guiutil.ButtonVisible(b.X, b.W, vpRight) {
 					btnOpacity[i] = 1
 				}
 			}
 		}
 		const btnFadeRate = 10 // higher = quicker fade
 		k := clamp32(btnFadeRate*dt, 0, 1)
-		for i, b := range l.buttons {
+		for i, b := range l.Buttons {
 			target := float32(0)
-			if buttonVisible(b.x, b.w, vpRight) {
+			if guiutil.ButtonVisible(b.X, b.W, vpRight) {
 				target = 1
 			}
 			btnOpacity[i] += (target - btnOpacity[i]) * k
@@ -660,8 +706,8 @@ func main() {
 		// from the pointer's current spot to the button's new centre.
 		if warpToAdd {
 			warpToAdd = false
-			pointerTargetX = l.addFrameRect.X + l.addFrameRect.Width/2
-			pointerTargetY = l.addFrameRect.Y + l.addFrameRect.Height/2
+			pointerTargetX = l.AddFrameRect.X + l.AddFrameRect.Width/2
+			pointerTargetY = l.AddFrameRect.Y + l.AddFrameRect.Height/2
 			pointerX, pointerY = float32(mx), float32(my)
 			pointerGliding = true
 		}
@@ -682,20 +728,20 @@ func main() {
 
 		// On a sprite-size change, animate the viewport to fit the whole sprite.
 		if s.Width() != lastW || s.Height() != lastH {
-			vp.animateFit(s.Width(), s.Height(), l.gridW, l.gridH, l.cell)
+			vp.animateFit(s.Width(), s.Height(), l.GridW, l.GridH, l.Cell)
 			lastW, lastH = s.Width(), s.Height()
 		}
 
 		// Is the cursor over the editor grid box? (Gates wheel zoom and paint.)
-		overGrid := mx >= l.gridX && mx < l.gridX+l.gridW &&
-			my >= l.gridY && my < l.gridY+l.gridH
+		overGrid := mx >= l.GridX && mx < l.GridX+l.GridW &&
+			my >= l.GridY && my < l.GridY+l.GridH
 
 		// The help reader, when open, captures all input ahead of everything else.
 		// The editor still renders underneath (drawn below), with the help overlay
 		// on top.
 		helpOpen := help != nil
 		if helpOpen {
-			if !help.update(fpInput()) {
+			if !help.update(frameIn) {
 				help = nil
 				helpOpen = false
 			}
@@ -712,8 +758,9 @@ func main() {
 		// The reset-confirm modal, when open, captures all input.
 		resetOpen := reset != nil
 		if resetOpen {
-			switch reset.update() {
+			switch reset.update(frameIn) {
 			case resetConfirmConfirmed:
+				c.Checkpoint()
 				c.ResetAll()
 				reset = nil
 				resetOpen = false
@@ -726,7 +773,7 @@ func main() {
 		// The frame context menu, when open, captures all input.
 		frameMenuOpen := frameMenu != nil
 		if frameMenuOpen {
-			switch frameMenu.Update(fpInput()) {
+			switch frameMenu.Update(frameIn) {
 			case zenui.Accepted:
 				applyFrameMenuPick(c, frameMenu.Result(), frameMenuFrame)
 				frameMenu = nil
@@ -741,13 +788,36 @@ func main() {
 		// editor's own interaction is frozen for the frame (geometry below is still
 		// computed so the editor renders normally underneath the dialog).
 		modal := helpOpen || resetOpen || frameMenuOpen || files.active()
+
+		// Global ATTR ON toggle: releasing Ctrl twice in quick succession
+		// flips a persistent, tool-independent mode — separate from the
+		// existing per-stroke Ctrl-held attribute-paint gesture, this stays
+		// on until toggled again, regardless of which tool is active or
+		// whether Ctrl is currently held.
+		if !modal {
+			if rl.IsKeyReleased(rl.KeyLeftControl) || rl.IsKeyReleased(rl.KeyRightControl) {
+				now := float32(rl.GetTime())
+				if now-lastCtrlReleaseTime < doubleClickWindow {
+					attrOnGlobal = !attrOnGlobal
+				}
+				lastCtrlReleaseTime = now
+			}
+		}
 		if helpOpen || resetOpen || frameMenuOpen {
 			// help/reset/frameMenu already updated above; suppress other interaction
 		} else if files.active() {
-			files.update(fpInput())
+			files.update(frameIn)
 		} else {
 			// File shortcuts: Ctrl+S save, Ctrl+O open, Ctrl+F toggle save form.
-			ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+			// ctrl also matches Cmd (Super) so every shortcut in this block works
+			// with either keymap — raylib-go/GLFW does not remap Cmd to Ctrl on
+			// macOS (KeyLeftSuper/KeyRightSuper are the actual Cmd keys, entirely
+			// distinct key codes from KeyLeftControl/KeyRightControl), so both
+			// must be checked explicitly to support Mac users idiomatically while
+			// keeping Ctrl working everywhere, including on a Mac with an
+			// external/cross-platform keyboard.
+			ctrl := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) ||
+				rl.IsKeyDown(rl.KeyLeftSuper) || rl.IsKeyDown(rl.KeyRightSuper)
 			if ctrl && rl.IsKeyPressed(rl.KeyS) {
 				if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
 					files.startSaveAs(c)
@@ -763,6 +833,49 @@ func main() {
 			}
 			if ctrl && rl.IsKeyPressed(rl.KeyF) {
 				c.ToggleSaveForm()
+			}
+			if ctrl && rl.IsKeyPressed(rl.KeyZ) {
+				if rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift) {
+					c.Redo()
+				} else {
+					c.Undo()
+				}
+			}
+			if ctrl && rl.IsKeyPressed(rl.KeyC) {
+				if c.HasSelection() {
+					c.CopySelectionToClipboard()
+				} else {
+					c.CopyFrame()
+				}
+			}
+			if ctrl && rl.IsKeyPressed(rl.KeyV) {
+				c.Checkpoint()
+				if c.HasSelectionClipboard() {
+					c.PasteSelectionClipboard()
+				} else {
+					c.PasteFrame()
+				}
+			}
+			if ctrl && rl.IsKeyPressed(rl.KeyD) {
+				c.ClearSelection()
+			}
+			// Enter/Escape on a pending floating selection (a move or paste
+			// not yet finalised): Enter confirms it in place, keeping the
+			// selection active so it can still be copied/moved again.
+			// Escape reverts the whole gesture via Undo — safe and exact,
+			// since LiftSelection/PasteSelectionClipboard already pushed a
+			// Checkpoint specifically to make this possible, rather than
+			// needing a separate "restore the lifted content" primitive.
+			if c.IsFloating() {
+				if rl.IsKeyPressed(rl.KeyEnter) || rl.IsKeyPressed(rl.KeyKpEnter) {
+					c.CommitFloatingSelection()
+				} else if rl.IsKeyPressed(rl.KeyEscape) {
+					c.Undo()
+				}
+			}
+			if (rl.IsKeyPressed(rl.KeyDelete) || rl.IsKeyPressed(rl.KeyBackspace)) && c.HasSelection() {
+				c.Checkpoint()
+				c.ClearSelectionArea()
 			}
 			if ctrl && rl.IsKeyPressed(rl.KeyE) {
 				shift := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
@@ -781,19 +894,53 @@ func main() {
 			}
 		}
 
-		// Pan gesture: either space + left-drag (space acts as a modifier, like
-		// Shift), or a middle-mouse-button drag on its own. Releasing the relevant
-		// button (or space) ends the pan. The middle button needs no modifier.
+		// Which tool is active in the tool palette, looked up once and shared
+		// by every tool-specific behaviour below (panning via the hand tool,
+		// eyedropper, zoom, fill) rather than re-querying per feature.
+		selectedTool, _ := toolPalette.Selected()
+		handToolActive := selectedTool == "hand"
+		zoomToolActive := selectedTool == "zoom"
+		fillToolActive := selectedTool == "fill"
+		eyedropperActive := selectedTool == "eyedropper"
+		selectToolActive := selectedTool == "select"
+		lineToolActive := selectedTool == "line"
+		rectToolActive := selectedTool == "rectangle"
+		triangleToolActive := selectedTool == "triangle"
+		ellipseToolActive := selectedTool == "ellipse"
+		polygonToolActive := selectedTool == "polygon"
+		textToolActive := selectedTool == "text"
+		shapeToolActive := lineToolActive || rectToolActive || triangleToolActive || ellipseToolActive || polygonToolActive
+
+		// Pan gesture: space + left-drag (space acts as a modifier, like Shift),
+		// a middle-mouse-button drag on its own, or plain left-drag while the
+		// hand tool is selected (matching the conventional paint-app Hand tool,
+		// which needs no modifier key). Releasing the relevant button (or
+		// space) ends the pan.
 		spaceHeld := rl.IsKeyDown(rl.KeySpace) && !modal
 		middlePan := rl.IsMouseButtonDown(rl.MouseButtonMiddle) && !modal
-		panning := (spaceHeld && rl.IsMouseButtonDown(rl.MouseLeftButton)) || middlePan
+		handPan := handToolActive && rl.IsMouseButtonDown(rl.MouseLeftButton) && !modal
+		panning := (spaceHeld && rl.IsMouseButtonDown(rl.MouseLeftButton)) || middlePan || handPan
+
+		// Zoom tool: a click is treated as one wheel notch, reusing the same
+		// cursor-anchored velocity model real wheel-scrolling drives — so it
+		// eases in and decays identically, just triggered by a click instead
+		// of a scroll. Alt/Option-click zooms out, matching the conventional
+		// paint-app Zoom tool.
+		if zoomToolActive && !modal && overGrid && rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+			zoomOut := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+			notch := float32(1)
+			if zoomOut {
+				notch = -1
+			}
+			vp.zoomVel += notch * zoomWheelGain
+		}
 
 		// Update pan/zoom (wheel zoom anchored at cursor, drag pan, inertia). While
 		// a modal dialog is open the viewport ignores the wheel and pan entirely.
-		vp.update(mx, my, l.gridX, l.gridY, l.cell, panning, overGrid && !modal)
+		vp.update(mx, my, l.GridX, l.GridY, l.Cell, panning, overGrid && !modal)
 
-		cellF := vp.cellF(l.cell)
-		oxF, oyF := vp.originF(l.gridX, l.gridY)
+		cellF := vp.cellF(l.Cell)
+		oxF, oyF := vp.originF(l.GridX, l.GridY)
 
 		// Preview focus point: the cursor's pixel while hovering the paint area,
 		// otherwise the last-modified pixel. Frozen while a modal is open so the
@@ -808,30 +955,28 @@ func main() {
 			}
 		}
 
-		// Press-and-hold the preview box to grow the full-preview popup. The
-		// press must begin over the box; holding keeps it open, release closes it.
-		overPreview := mx >= l.previewX && mx < l.previewX+l.previewW &&
-			my >= l.previewY && my < l.previewY+l.previewH
-		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && overPreview {
-			previewHeld = true
+		// Still needed below to suppress painting when a click lands on the
+		// preview box rather than the canvas.
+		overPreview := l.PreviewX <= mx && mx < l.PreviewX+l.PreviewW &&
+			l.PreviewY <= my && my < l.PreviewY+l.PreviewH
+		overToolPalette := toolPalette.Bounds().Contains(mx, my)
+
+		// The preview pane owns its own press-hold/zoom-cycle/popup-easing state.
+		// Press-start and right-click zoom-cycling are suppressed while a modal
+		// is open, or while the pen options panel is open (it now lives above
+		// the toolpalette, overlapping the preview box's own screen area, so
+		// without this it silently steals clicks meant for the panel) — by
+		// clearing those two Input fields only. MouseDown still reflects
+		// reality, so release-based clearing and the popup's decay toward 0
+		// keep running regardless — matching the old code's asymmetry, where
+		// a stuck-open popup could never survive a modal opening mid-hold.
+		preview.SetFocus(focusX, focusY)
+		previewIn := frameIn
+		if modal || penPanel != nil || fontMenu != nil {
+			previewIn.MousePressed = false
+			previewIn.MouseRightPressed = false
 		}
-		if !rl.IsMouseButtonDown(rl.MouseLeftButton) {
-			previewHeld = false
-		}
-		// Right-click on the preview cycles the fixed detail zoom (1 -> 2 -> 3 ->
-		// 4 -> 1).
-		if !modal && rl.IsMouseButtonPressed(rl.MouseRightButton) && overPreview {
-			previewZoom = previewZoom%4 + 1
-		}
-		popupTarget := float32(0)
-		if previewHeld {
-			popupTarget = 1
-		}
-		// Ease in/out toward the target.
-		popup += (popupTarget - popup) * clamp32(10*dt, 0, 1)
-		if popup < 0.001 {
-			popup = 0
-		}
+		preview.Update(previewIn, dt)
 
 		// Ease the drawer open/closed.
 		drawerOpen += (drawerTarget - drawerOpen) * clamp32(9*dt, 0, 1)
@@ -863,12 +1008,16 @@ func main() {
 		// Ctrl acts as an attribute-paint modifier (like Shift): painting while
 		// Ctrl is held stamps the current ink/paper/bright onto the cell rather
 		// than drawing/erasing the bitmap.
-		attrPaint := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+		// Ctrl or Option (Alt) both act as the attribute-paint modifier — Option
+		// is the conventional Mac modifier for this kind of held alternate-paint
+		// gesture, Ctrl the cross-platform default.
+		attrPaint := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl) ||
+			rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
 
 		// The drawer triangle sits inside the viewport's bottom-right corner, so
 		// painting must be suppressed over its (enlarged) hit area; the click
 		// toggles the drawer instead.
-		overDrawerToggle := rectHit(l.drawerToggleHit, mx, my)
+		overDrawerToggle := guidraw.RectHit(l.DrawerToggleHit, mx, my)
 
 		shiftHeld := rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 
@@ -880,7 +1029,7 @@ func main() {
 		// Editor grid interaction. Suppressed while the pan gesture is active so a
 		// pan-drag never paints, over the drawer toggle, and for the remainder of
 		// a hold that began on the drawer toggle.
-		painting := !modal && !panning && overGrid && !overDrawerToggle && !toggleHeld &&
+		painting := !modal && !panning && overGrid && !overDrawerToggle && !toggleHeld && !eyedropperActive && !fillToolActive && !zoomToolActive && !selectToolActive && !shapeToolActive && !textToolActive &&
 			(rl.IsMouseButtonDown(rl.MouseLeftButton) || rl.IsMouseButtonDown(rl.MouseRightButton))
 		if painting {
 			px := int((float32(mx) - oxF) / cellF)
@@ -891,47 +1040,248 @@ func main() {
 			// from it and kept for the rest of the stroke.
 			if !strokeActive {
 				strokeActive = true
+				c.Checkpoint()
 				strokeAnchorX, strokeAnchorY = px, py
-				strokeAxis = axisNone
+				strokeAxis = guiutil.AxisNone
 				lastPaintX, lastPaintY = px, py
 			}
 			if shiftHeld {
-				px, py, strokeAxis = lockAxis(strokeAnchorX, strokeAnchorY, px, py, strokeAxis)
+				px, py, strokeAxis = guiutil.LockAxis(strokeAnchorX, strokeAnchorY, px, py, strokeAxis)
 			} else {
 				// Shift released mid-stroke: stop locking, but a later Shift press in
 				// the same stroke re-decides from the anchor.
-				strokeAxis = axisNone
+				strokeAxis = guiutil.AxisNone
 			}
 
 			if float32(mx) >= oxF && float32(my) >= oyF {
-				// Paint one pixel, bounds-checked, using the current tool mode.
+				// Paint one pixel (attribute stamp) or a whole brush stamp
+				// (bitmap paint), bounds-checked, using the current tool mode.
+				// Attribute stamping stays single-pixel: ZX attributes apply
+				// per 8x8 cell, so a multi-pixel "brush" has no well-defined
+				// meaning there the way it does for the bitmap.
 				paintPixel := func(x, y int) {
-					if x < 0 || y < 0 || x >= s.Width() || y >= s.Height() {
+					if attrPaint && !spaceHeld {
+						if x >= 0 && y >= 0 && x < s.Width() && y < s.Height() {
+							c.PaintAttr(x, y)
+						}
 						return
 					}
-					switch {
-					case attrPaint && !spaceHeld:
-						c.PaintAttr(x, y)
-					case rl.IsMouseButtonDown(rl.MouseLeftButton):
-						c.Paint(x, y, true)
-					default:
-						c.Paint(x, y, false)
-					}
+					on := rl.IsMouseButtonDown(rl.MouseLeftButton)
+					guiutil.BrushStamp(brushShapeFor(penShapeID), penSize, func(bdx, bdy int) {
+						bx, by := x+bdx, y+bdy
+						if bx < 0 || by < 0 || bx >= s.Width() || by >= s.Height() {
+							return
+						}
+						c.Paint(bx, by, on)
+					})
 				}
 				// Interpolate a straight line from the last painted pixel to the
 				// current one so a fast stroke stays continuous instead of dotted.
-				forEachLinePixel(lastPaintX, lastPaintY, px, py, paintPixel)
+				guiutil.ForEachLinePixel(lastPaintX, lastPaintY, px, py, paintPixel)
 				lastPaintX, lastPaintY = px, py
 			}
 		} else {
 			strokeActive = false
-			strokeAxis = axisNone
+			strokeAxis = guiutil.AxisNone
+		}
+
+		// Eyedropper tool: a single click (not a drag) picks the clicked cell's
+		// ink (left button) or paper (right button) as the new current
+		// selection, matching the palette swatches' left=ink/right=paper
+		// convention. No Checkpoint: like the swatches, this changes tool
+		// state, not document content, so it isn't part of the undo history.
+		if eyedropperActive && !modal && overGrid {
+			epx := int((float32(mx) - oxF) / cellF)
+			epy := int((float32(my) - oyF) / cellF)
+			if float32(mx) >= oxF && float32(my) >= oyF &&
+				epx >= 0 && epy >= 0 && epx < s.Width() && epy < s.Height() {
+				attr := s.AttrAt(epx, epy)
+				switch {
+				case rl.IsMouseButtonPressed(rl.MouseLeftButton):
+					c.SetInk(zxpalette.Ink(attr))
+					c.SetBright(zxpalette.Bright(attr))
+				case rl.IsMouseButtonPressed(rl.MouseRightButton):
+					c.SetPaper(zxpalette.Paper(attr))
+					c.SetBright(zxpalette.Bright(attr))
+				}
+			}
+		}
+
+		// Fill tool: a single click floods the clicked pixel's connected region
+		// to the opposite state — left-click fills to on, right-click to off,
+		// matching the paint tool's own convention for the two buttons.
+		if fillToolActive && !modal && overGrid &&
+			(rl.IsMouseButtonPressed(rl.MouseLeftButton) || rl.IsMouseButtonPressed(rl.MouseRightButton)) {
+			fpx := int((float32(mx) - oxF) / cellF)
+			fpy := int((float32(my) - oyF) / cellF)
+			if float32(mx) >= oxF && float32(my) >= oyF {
+				ctrlHeld := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+				floodFill(c, fpx, fpy, rl.IsMouseButtonPressed(rl.MouseLeftButton), ctrlHeld)
+			}
+		}
+
+		// Select tool: dragging outside the current selection defines a new
+		// one; dragging inside it moves the lifted content, or duplicates it
+		// if Alt/Option is held at the moment the drag starts. Checkpointed
+		// once at lift time (covering the whole gesture, however it resolves
+		// — one undo step whether it's eventually dropped in place or dragged
+		// far away), not again at commit.
+		if selectToolActive && !modal && overGrid {
+			spx := int((float32(mx) - oxF) / cellF)
+			spy := int((float32(my) - oyF) / cellF)
+			validClick := float32(mx) >= oxF && float32(my) >= oyF
+			ctrlHeld := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+			altHeld := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+
+			switch {
+			case rl.IsMouseButtonPressed(rl.MouseLeftButton) && validClick:
+				selDragging = true
+				sx, sy, sw, sh, hasSel := c.Selection()
+				insideSelection := hasSel && spx >= sx && spx < sx+sw && spy >= sy && spy < sy+sh
+				// Ctrl or Alt forces a move/duplicate of the existing
+				// selection even when the click starts outside its bounds —
+				// Photoshop's temporary-Move-tool (Ctrl) and duplicate-
+				// while-dragging (Alt) modifiers, extended to work
+				// regardless of click position rather than only once
+				// already clicking inside the marquee.
+				if hasSel && (insideSelection || ctrlHeld || altHeld) {
+					selDraggingMove = true
+					c.Checkpoint()
+					c.LiftSelection(altHeld)
+					selDragOffX, selDragOffY = spx-sx, spy-sy
+				} else {
+					selDraggingMove = false
+					selAnchorX, selAnchorY = spx, spy
+					selNewAttemptHadPriorSelection = hasSel
+					// Alt-drag when defining a brand new selection (nothing
+					// existing to move/duplicate) grows it from the clicked
+					// point outward instead of treating that point as a
+					// corner — the same centre/corner convention the
+					// ellipse tool uses, and the Photoshop modifier
+					// Horatio specifically asked for here.
+					x0, y0, x1, y1 := guiutil.CenterOrCornerBounds(selAnchorX, selAnchorY, spx, spy, altHeld)
+					c.SetSelection(x0, y0, x1, y1)
+				}
+			case selDragging && rl.IsMouseButtonDown(rl.MouseLeftButton):
+				if selDraggingMove {
+					c.MoveFloatingTo(spx-selDragOffX, spy-selDragOffY)
+				} else {
+					x0, y0, x1, y1 := guiutil.CenterOrCornerBounds(selAnchorX, selAnchorY, spx, spy, altHeld)
+					c.SetSelection(x0, y0, x1, y1)
+				}
+			}
+			if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+				// A genuine click (no movement from the anchor) that started
+				// as a new-selection attempt while something was already
+				// selected is a deselect gesture, not "select this one
+				// pixel" — which has no sensible meaning as a user action.
+				if !selDraggingMove && selNewAttemptHadPriorSelection && spx == selAnchorX && spy == selAnchorY {
+					c.ClearSelection()
+				}
+				selDragging = false
+			}
+		}
+
+		// Shape tools: drag from an anchor point to the current cursor
+		// position; the live end point is tracked for the preview overlay
+		// while dragging, and the shape is only actually drawn into the
+		// sprite on release — one Checkpoint per shape, however long the
+		// drag. All three reduce to straight-line walks (guiutil.
+		// ForEachLinePixel/RectOutline/TriangleOutline), just with different
+		// point sequences.
+		if shapeToolActive && !modal && overGrid {
+			spx := int((float32(mx) - oxF) / cellF)
+			spy := int((float32(my) - oyF) / cellF)
+			validClick := float32(mx) >= oxF && float32(my) >= oyF
+
+			switch {
+			case rl.IsMouseButtonPressed(rl.MouseLeftButton) && validClick:
+				shapeDragging = true
+				shapeStartX, shapeStartY = spx, spy
+				shapeEndX, shapeEndY = spx, spy
+			case shapeDragging && rl.IsMouseButtonDown(rl.MouseLeftButton):
+				shapeEndX, shapeEndY = spx, spy
+			}
+			// Polygon side count is adjustable mid-drag: number keys 3-9 set
+			// it directly, live-updating both the preview and the eventual
+			// commit shape.
+			if polygonToolActive && shapeDragging {
+				for n := 3; n <= 9; n++ {
+					if rl.IsKeyPressed(int32(rl.KeyOne) + int32(n-1)) {
+						polygonSides = n
+					}
+				}
+			}
+			if shapeDragging && rl.IsMouseButtonReleased(rl.MouseLeftButton) {
+				shapeDragging = false
+				c.Checkpoint()
+				// Ctrl applies attributes instead of the bitmap, matching the
+				// paintbrush's own Ctrl-attribute-paint gesture — Ctrl only
+				// here, not Alt, since Alt already means something else for
+				// these tools (the ellipse's centre/corner toggle, the
+				// selection's duplicate/centre-mode).
+				shapeAttrPaint := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+				plot := func(x, y int) {
+					if x < 0 || y < 0 || x >= s.Width() || y >= s.Height() {
+						return
+					}
+					if shapeAttrPaint {
+						c.PaintAttr(x, y)
+					} else {
+						c.Paint(x, y, true)
+					}
+				}
+				switch {
+				case lineToolActive:
+					guiutil.ForEachLinePixel(shapeStartX, shapeStartY, shapeEndX, shapeEndY, plot)
+				case rectToolActive:
+					guiutil.RectOutline(shapeStartX, shapeStartY, shapeEndX, shapeEndY, plot)
+				case triangleToolActive:
+					guiutil.TriangleOutline(shapeStartX, shapeStartY, shapeEndX, shapeEndY, plot)
+				case ellipseToolActive:
+					altHeld := rl.IsKeyDown(rl.KeyLeftAlt) || rl.IsKeyDown(rl.KeyRightAlt)
+					ex0, ey0, ex1, ey1 := guiutil.CenterOrCornerBounds(shapeStartX, shapeStartY, shapeEndX, shapeEndY, !altHeld)
+					guiutil.EllipseOutline(ex0, ey0, ex1, ey1, plot)
+				case polygonToolActive:
+					guiutil.PolygonOutline(polygonSides, shapeStartX, shapeStartY, shapeEndX, shapeEndY, plot)
+				}
+			}
+		}
+
+		// Text tool: a click starts (or, if one is already active, commits
+		// the current entry and starts a new one at the new position —
+		// matching the "starting elsewhere finalises the old one" convention
+		// already used for selections). Typing is captured every frame while
+		// active; Enter commits, Escape discards.
+		if textToolActive && !modal {
+			if rl.IsMouseButtonPressed(rl.MouseLeftButton) && overGrid {
+				tpx := int((float32(mx) - oxF) / cellF)
+				tpy := int((float32(my) - oyF) / cellF)
+				if float32(mx) >= oxF && float32(my) >= oyF {
+					if textState.active {
+						commitText(c, textFontsList[textFontIdx].font, &textState)
+					}
+					ctrlHeldAtStart := rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
+					textState = textEntry{active: true, x: tpx, y: tpy, desiredCol: -1, attrPaint: ctrlHeldAtStart || attrOnGlobal}
+				}
+			}
+			if textState.active {
+				if textState.Update(frameIn, textFontsList[textFontIdx].font) {
+					textState = textEntry{}
+				}
+			}
+		} else if textState.active {
+			// Switched to a different tool with an entry still pending:
+			// commit it, matching the same rule selections and pen moves
+			// follow rather than silently discarding typed work.
+			commitText(c, textFontsList[textFontIdx].font, &textState)
+			textState = textEntry{}
 		}
 
 		spectrum := c.Mode() == ui.SpectrumColour
 
 		// Clicking the title block toggles collapse (and consumes the click).
-		overTitle := rectHit(l.titleRect, mx, my)
+		overTitle := guidraw.RectHit(l.TitleRect, mx, my)
 		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && overTitle {
 			if titleCollapseTarget >= 0.5 {
 				titleCollapseTarget = 0
@@ -957,10 +1307,10 @@ func main() {
 		// proportional to the pointer's X; the drag continues until release.
 		frameFromScrubX := func(px int) int {
 			nf := c.Sprite.FrameCount()
-			if nf <= 1 || l.scrubRect.Width <= 0 {
+			if nf <= 1 || l.ScrubRect.Width <= 0 {
 				return 0
 			}
-			t := (float32(px) - l.scrubRect.X) / l.scrubRect.Width
+			t := (float32(px) - l.ScrubRect.X) / l.ScrubRect.Width
 			if t < 0 {
 				t = 0
 			}
@@ -973,7 +1323,11 @@ func main() {
 			}
 			return idx
 		}
-		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && rectHit(l.scrubRect, mx, my) {
+		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && guidraw.RectHit(l.ScrubRect, mx, my) {
+			if textState.active {
+				commitText(c, textFontsList[textFontIdx].font, &textState)
+				textState = textEntry{}
+			}
 			scrubbing = true
 		}
 		if scrubbing {
@@ -984,73 +1338,149 @@ func main() {
 			}
 		}
 
-		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && !overPreview && !overTitle && !overDrawerToggle && !scrubbing {
-			vpRight := l.gridX + l.gridW
-			for _, b := range l.buttons {
+		if !modal && rl.IsMouseButtonPressed(rl.MouseLeftButton) && !overPreview && !overToolPalette && !overTitle && !overDrawerToggle && !overGrid && !scrubbing && fontMenu == nil {
+			// A pending text entry is committed before any button action —
+			// play, save, flip, invert, frame navigation, or anything else —
+			// not just when clicking the canvas or switching tools. The user
+			// clicking a button is clearly done with the text.
+			if textState.active {
+				commitText(c, textFontsList[textFontIdx].font, &textState)
+				textState = textEntry{}
+			}
+			vpRight := l.GridX + l.GridW
+			for _, b := range l.Buttons {
 				// A button that has faded out past the viewport's right edge is not
 				// clickable (it is on its way out or already gone).
-				if !buttonVisible(b.x, b.w, vpRight) {
+				if !guiutil.ButtonVisible(b.X, b.W, vpRight) {
 					continue
 				}
-				if b.hit(mx, my) {
-					b.action()
+				if b.Hit(mx, my) {
+					b.Action()
 				}
 			}
-			for _, b := range l.modeButtons {
-				if b.hit(mx, my) {
-					b.action()
+			for _, b := range l.ModeButtons {
+				if b.Hit(mx, my) {
+					b.Action()
 				}
 			}
 			// Chequer-toggle LEDs below the two bitmap-mode buttons. Clicking a LED
 			// also selects that bitmap mode (as if its button were pressed).
-			if rectHit(l.chkLedWhite, mx, my) {
-				chequerOnWhite = !chequerOnWhite
+			if guidraw.RectHit(l.ChkLedWhite, mx, my) {
+				theme.ChequerOnWhite = !theme.ChequerOnWhite
 				c.SetMode(ui.BitmapWhite)
 			}
-			if rectHit(l.chkLedBlack, mx, my) {
-				chequerOnBlack = !chequerOnBlack
+			if guidraw.RectHit(l.ChkLedBlack, mx, my) {
+				theme.ChequerOnBlack = !theme.ChequerOnBlack
 				c.SetMode(ui.BitmapBlack)
 			}
-			for _, b := range l.onionButtons {
-				if b.hit(mx, my) {
-					b.action()
+			for _, b := range l.OnionButtons {
+				if b.Hit(mx, my) {
+					b.Action()
 				}
 			}
-			for i := range l.frameRects {
-				if rectHit(l.frameRects[i], mx, my) {
+			for i := range l.FrameRects {
+				if guidraw.RectHit(l.FrameRects[i], mx, my) {
 					c.SelectFrame(i)
 					drag.press(i, mx, my)
 				}
 			}
-			if rectHit(l.addFrameRect, mx, my) {
+			if guidraw.RectHit(l.AddFrameRect, mx, my) {
 				before := c.Sprite.FrameCount()
+				c.Checkpoint()
 				c.AddFrame()
 				if c.Sprite.FrameCount() > before {
 					warpToAdd = true
 				}
 			}
-			if rectHit(l.removeFrameRect, mx, my) {
-				c.RemoveFrame()
-			}
-			if rectHit(l.helpRect, mx, my) {
+			if guidraw.RectHit(l.HelpRect, mx, my) {
 				help = newHelpModal()
 			}
-			if spectrum {
-				for i := 0; i < 16; i++ {
-					if rectHit(l.swatchRects[i], mx, my) {
-						c.SetInk(l.swatchBase[i])
-						c.SetBright(l.swatchBright[i])
+			if attrOnIndicatorRect(l, txt, attrOnGlobal).Contains(mx, my) {
+				attrOnGlobal = !attrOnGlobal
+			}
+		}
+
+		// Palette swatch picks (Spectrum mode only): left-click sets ink,
+		// right-click sets paper, both from a single Update call.
+		if !modal && spectrum {
+			res := palette.Update(frameIn)
+			if res.InkPicked {
+				c.SetInk(res.Base)
+				c.SetBright(res.Bright)
+			}
+			if res.PaperPicked {
+				c.SetPaper(res.Base)
+				c.SetBright(res.Bright)
+			}
+		}
+
+		// Tool palette pick: available in every mode, since tool choice isn't
+		// a Spectrum-Colour-specific concept. Switching away from the select
+		// tool while something is floating (a pending move or paste) commits
+		// it first — matching Photoshop's "choose a different tool" commit
+		// trigger, alongside Ctrl/Cmd+D and starting a new selection.
+		if !modal && penPanel == nil && fontMenu == nil {
+			pick := toolPalette.Update(frameIn)
+			if pick.Picked && pick.ID != "select" && c.IsFloating() {
+				c.CommitFloatingSelection()
+			}
+			// Double-clicking the hand tool re-fits the whole sprite to the
+			// viewport — the same manual "return to fit" gesture Photoshop
+			// uses for its own hand tool, and the only way back to a fitted
+			// view once the user has zoomed away from it (animateFit
+			// otherwise only runs automatically, once, on a sprite resize).
+			if pick.Picked && pick.ID == "hand" {
+				now := float32(rl.GetTime())
+				if now-lastHandClickTime < doubleClickWindow {
+					vp.animateFit(s.Width(), s.Height(), l.GridW, l.GridH, l.Cell)
+				}
+				lastHandClickTime = now
+			}
+		}
+
+		// Pen options panel: right-click the paintbrush button to open it,
+		// click outside it or press Escape to close. While open, it owns
+		// mouse input for shape/size picks; penShapeID/penSize are read back
+		// every frame so paintPixel always sees the latest choice.
+		if !modal {
+			if penPanel != nil {
+				penShapeID, penSize = penPanel.Update(frameIn)
+				closing := (rl.IsMouseButtonPressed(rl.MouseLeftButton) || rl.IsMouseButtonPressed(rl.MouseRightButton)) &&
+					!penPanel.Bounds().Contains(mx, my)
+				if closing || rl.IsKeyPressed(rl.KeyEscape) {
+					penPanel = nil
+				}
+			} else if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+				if id, ok := toolPalette.HitTest(mx, my); ok && id == "paintbrush" {
+					if btnRect, ok := toolPalette.RectFor("paintbrush"); ok {
+						// Anchored above the button, not below: the panel's total
+						// height is the shape row (32) + gap (8) + size row (24) =
+						// 64, matching the layout newPenOptions itself computes.
+						anchor := zenui.Rect{X: btnRect.X, Y: btnRect.Y - 64 - 6}
+						penPanel = newPenOptions(anchor, penShapeID, penSize)
 					}
 				}
 			}
 		}
 
-		// Right-click on a palette swatch selects paper (Spectrum mode only).
-		if !modal && spectrum && rl.IsMouseButtonPressed(rl.MouseRightButton) {
-			for i := 0; i < 16; i++ {
-				if rectHit(l.swatchRects[i], mx, my) {
-					c.SetPaper(l.swatchBase[i])
-					c.SetBright(l.swatchBright[i])
+		// Text font picker: right-click the text tool button to open it.
+		// Menu already handles Escape and click-outside as Cancelled
+		// internally, so no manual bounds/closing check is needed here,
+		// unlike the pen panel above (which uses a plain Rect, not Menu).
+		if !modal {
+			if fontMenu != nil {
+				switch fontMenu.Update(frameIn) {
+				case zenui.Accepted:
+					textFontIdx = fontMenu.Result()
+					fontMenu = nil
+				case zenui.Cancelled:
+					fontMenu = nil
+				}
+			} else if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+				if id, ok := toolPalette.HitTest(mx, my); ok && id == "text" {
+					if btnRect, ok := toolPalette.RectFor("text"); ok {
+						fontMenu = newTextFontMenu(btnRect, textFontsList, textFontIdx)
+					}
 				}
 			}
 		}
@@ -1059,10 +1489,10 @@ func main() {
 		// Copy/Paste/Insert-and-paste/Delete). The frame is selected here, before
 		// the menu opens — see applyFrameMenuPick's comment for why that matters.
 		if !modal && frameMenu == nil && rl.IsMouseButtonPressed(rl.MouseRightButton) {
-			for i := range l.frameRects {
-				if rectHit(l.frameRects[i], mx, my) {
+			for i := range l.FrameRects {
+				if guidraw.RectHit(l.FrameRects[i], mx, my) {
 					c.SelectFrame(i)
-					fr := l.frameRects[i]
+					fr := l.FrameRects[i]
 					anchor := zenui.Rect{X: int(fr.X), Y: int(fr.Y), W: int(fr.Width), H: int(fr.Height)}
 					frameMenu = newFrameMenu(c, anchor)
 					frameMenuFrame = i
@@ -1081,9 +1511,10 @@ func main() {
 			}
 			if rl.IsMouseButtonReleased(rl.MouseLeftButton) {
 				if drag.active {
-					inBand := my >= l.frameStripY && my < l.frameStripY+frameBtnH
-					if inBand && drag.source < len(l.frameRects) {
-						gap := frameDropGap(l.frameRects, float32(mx))
+					inBand := my >= l.FrameStripY && my < l.FrameStripY+frameBtnH
+					if inBand && drag.source < len(l.FrameRects) {
+						gap := frameDropGap(l.FrameRects, float32(mx))
+						c.Checkpoint()
 						c.MoveFrame(drag.source, dragGapToMoveTarget(drag.source, gap))
 					}
 				}
@@ -1093,34 +1524,48 @@ func main() {
 			}
 		}
 
-		// Keyboard shortcuts mirror the TUI where sensible.
-		if !modal {
+		// Keyboard shortcuts. Suppressed while the text tool, a pending
+		// selection, or an in-progress polygon drag has exclusive keyboard
+		// focus — handleKeys' IsKeyPressed checks run independently of
+		// GetCharPressed's character queue, so without this guard they fire
+		// simultaneously with typing/confirming/adjusting (Enter both
+		// commits text AND toggles play; typing the digit '1' both appends
+		// to the string AND selects frame 1; setting a polygon to 3 sides
+		// mid-drag would also jump to frame 3).
+		if !modal && !textState.active && !wasFloatingThisFrame && !(polygonToolActive && shapeDragging) {
 			handleKeys(c)
 		}
 
 		// --- draw ---
 		rl.BeginDrawing()
-		rl.ClearBackground(colBG)
-		drawUI(txt, c, l, cellF, oxF, oyF, mx, my, focusX, focusY, popup, previewZoom, btnOpacity, paletteFade)
+		rl.ClearBackground(theme.BG)
+		guidraw.DrawUI(txt, c, l, theme, cellF, oxF, oyF, pppMin, pppMax, mx, my, focusX, focusY, btnOpacity)
+		drawSelectionOverlay(c, l, oxF, oyF, cellF)
+		drawShapePreview(c, l, oxF, oyF, cellF, shapeDragging, shapeStartX, shapeStartY, shapeEndX, shapeEndY, lineToolActive, rectToolActive, triangleToolActive, ellipseToolActive, polygonToolActive, polygonSides)
+		drawTextPreview(textFontsList[textFontIdx].font, &textState, int32(l.GridX), int32(l.GridY), int32(l.GridW), int32(l.GridH), oxF, oyF, cellF, previewInkColour(c))
+		drawZenuiOverlays(txt, iconTxt, c, l, theme, cellF, paletteFade, palette, preview, toolPalette, penPanel, penSize, attrOnGlobal)
 
 		// Animated OSD caption for the latest status message: rises from the
 		// bottom-right corner, past the palette, fading as it goes, with magical
 		// pixels scattered around it.
-		tw := txt.Measure(upper(c.Status()), osdTextScale)
+		tw := txt.Measure(guiutil.Upper(c.Status()), osdTextScale)
 		th := txt.CellH() * osdTextScale
-		osdNote.update(rl.GetFrameTime(), c.StatusSeq(), upper(c.Status()), tw, th)
-		osdNote.draw(txt, l.winW-pad, l.winH, tw, th)
+		osdNote.update(rl.GetFrameTime(), c.StatusSeq(), guiutil.Upper(c.Status()), tw, th)
+		osdNote.draw(txt, l.WinW-pad, l.WinH, tw, th)
 
 		// Modal file dialog overlays the whole editor when open.
-		files.draw(fpRenderer{txt: txt}, l.winW, l.winH)
+		files.draw(fpRenderer{txt: txt}, l.WinW, l.WinH)
 		if help != nil {
-			help.draw(fpRenderer{txt: txt}, l.winW, l.winH)
+			help.draw(fpRenderer{txt: txt}, l.WinW, l.WinH)
 		}
 		if reset != nil {
-			reset.draw(txt, l.winW, l.winH)
+			reset.draw(txt, l.WinW, l.WinH)
 		}
 		if frameMenu != nil {
-			frameMenu.Draw(fpRenderer{txt: txt}, l.winW, l.winH, fpTheme())
+			frameMenu.Draw(fpRenderer{txt: txt}, l.WinW, l.WinH, fpTheme())
+		}
+		if fontMenu != nil {
+			fontMenu.Draw(fpRenderer{txt: txt}, l.WinW, l.WinH, fpTheme())
 		}
 		if drag.active {
 			drawFrameDrag(txt, l, drag, mx, my)
@@ -1155,1051 +1600,102 @@ func handleKeys(c *ui.Controller) {
 // resizeCells grows or shrinks the sprite by whole character cells (8 px) in
 // each axis, non-destructively, clamped to the model's size limits.
 func resizeCells(c *ui.Controller, dCols, dRows int) {
+	c.Checkpoint()
 	w := c.Sprite.Width() + dCols*model.Cell
 	h := c.Sprite.Height() + dRows*model.Cell
 	c.SetSize(w, h)
 }
 
-func drawUI(txt *bdfText, c *ui.Controller, l layout, cell, ox, oy float32, mx, my, focusX, focusY int, popup float32, previewZoom int, btnOpacity []float32, paletteFade float32) {
-	s := c.Sprite
-
-	// Title block. Expanded: ZENIMATE large, dimmer subtitle, then the size/frame
-	// header. Collapsed: a small button that restores the title on click. The
-	// whole block is the click target that toggles collapse.
-	if l.titleCollapsed {
-		r := l.titleRect
-		bc := colBtn
-		if rectHit(r, mx, my) {
-			bc = colBtnHot
-		}
-		rl.DrawRectangleRec(r, bc)
-		rl.DrawRectangleLinesEx(r, 1, colGrid)
-		const zscale = 2
-		zw := txt.Measure("Z", zscale)
-		zh := txt.CellH() * zscale
-		txt.Draw("Z", int(r.X)+(int(r.Width)-zw)/2, int(r.Y)+(int(r.Height)-zh)/2, zscale, colYellow)
-	} else {
-		txt.Draw("ZENIMATE", pad, pad, 3, colYellow)
-		txt.Draw("ZX SPECTRUM, PAINT AND ANIMATE", pad, pad+30, 1, colDim)
-		header := "SIZE " + itoa(s.Width()) + "X" + itoa(s.Height()) +
-			"  FRAME " + itoa(s.Selected()+1) + "/" + itoa(s.FrameCount())
-		txt.Draw(header, pad, pad+50, 1, colText)
-		// Source line: which file/bundle the sprite is from (or "unsaved").
-		// Long labels are truncated to 30 characters followed by an ellipsis.
-		txt.Draw(upper(truncateLabel(c.SourceLabel(), 30)), pad, pad+64, 1, colDim)
-	}
-
-	// Horizontal frame strip near the top (mirrors the TUI's frame row). When any
-	// label is three characters (F10 and beyond) the font is reduced for the
-	// whole strip so the wider labels fit; otherwise the larger size is used.
-	// Either way each label is centred in its button.
-	labelScale := 2
-	if s.FrameCount() >= 10 {
-		labelScale = 1
-	}
-	// Frame scrubber slider above the buttons: a thin track with a small square
-	// indicator marking the current frame. The square sits on the slider's
-	// baseline and rises a few pixels above its top; drag it to move between
-	// frames.
-	if l.scrubRect.Width > 0 {
-		rl.DrawRectangleRec(l.scrubRect, colBtn)
-		rl.DrawRectangleLinesEx(l.scrubRect, 1, colGrid)
-		nf := s.FrameCount()
-		if nf > 0 {
-			const overhang = 4 // pixels the square rises above the slider top
-			side := l.scrubRect.Height + overhang
-			// Centre the square over the current frame's slot.
-			slot := l.scrubRect.Width / float32(nf)
-			cx := l.scrubRect.X + (float32(s.Selected())+0.5)*slot
-			sqX := cx - side/2
-			// Keep the square within the slider's horizontal span.
-			if sqX < l.scrubRect.X {
-				sqX = l.scrubRect.X
-			}
-			if sqX+side > l.scrubRect.X+l.scrubRect.Width {
-				sqX = l.scrubRect.X + l.scrubRect.Width - side
-			}
-			// Bottom-aligned to the slider baseline, extending upward by overhang.
-			sqY := l.scrubRect.Y + l.scrubRect.Height - side
-			rl.DrawRectangleRec(rl.NewRectangle(sqX, sqY, side, side), colSel)
-		}
-	}
-	for i := range l.frameRects {
-		r := l.frameRects[i]
-		fillc := colBtn
-		if i == s.Selected() {
-			fillc = colSel
-		} else if rectHit(r, mx, my) {
-			fillc = colBtnHot
-		}
-		rl.DrawRectangle(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), fillc)
-		rl.DrawRectangleLines(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height), colGrid)
-		label := "F" + itoa(i+1)
-		lw := txt.Measure(label, labelScale)
-		lh := txt.CellH() * labelScale
-		txt.Draw(label, int(r.X)+(int(r.Width)-lw)/2, int(r.Y)+(int(r.Height)-lh)/2, labelScale, colText)
-	}
-
-	// Frame +/- buttons to the right of the strip.
-	drawSmallBtn := func(r rl.Rectangle, label string, enabled bool) {
-		bc := colBtn
-		if !enabled {
-			bc = colBG
-		} else if rectHit(r, mx, my) {
-			bc = colBtnHot
-		}
-		rl.DrawRectangleRec(r, bc)
-		rl.DrawRectangleLinesEx(r, 1, colGrid)
-		lc := colText
-		if !enabled {
-			lc = colDim
-		}
-		// Smaller symbol (scale 1) centred in the button box.
-		const gscale = 1
-		gw := txt.Measure(label, gscale)
-		gh := txt.CellH() * gscale
-		txt.Draw(label, int(r.X)+(int(r.Width)-gw)/2, int(r.Y)+(int(r.Height)-gh)/2, gscale, lc)
-	}
-	drawSmallBtn(l.removeFrameRect, "-", s.FrameCount() > model.MinFrames)
-	drawSmallBtn(l.addFrameRect, "+", s.FrameCount() < model.MaxFrames)
-	drawSmallBtn(l.helpRect, "HELP", true)
-
-	// View-mode buttons; the active mode is highlighted.
-	modeNames := []ui.ViewMode{ui.BitmapWhite, ui.BitmapBlack, ui.SpectrumColour}
-	for i, b := range l.modeButtons {
-		bc := colBtn
-		if c.Mode() == modeNames[i] {
-			bc = colSel
-		} else if b.hit(mx, my) {
-			bc = colBtnHot
-		}
-		rl.DrawRectangle(int32(b.x), int32(b.y), int32(b.w), int32(b.h), bc)
-		rl.DrawRectangleLines(int32(b.x), int32(b.y), int32(b.w), int32(b.h), colGrid)
-		drawWrappedLabel(txt, b, colText)
-	}
-
-	// Chequer-toggle LEDs below the two bitmap-mode buttons: lit (green) when the
-	// chequer is on for that mode, dark when off.
-	drawLed := func(r rl.Rectangle, on bool) {
-		fill := colBtn // dark when off
-		if on {
-			fill = colSel // green when on
-		}
-		rl.DrawRectangleRec(r, fill)
-		rl.DrawRectangleLinesEx(r, 1, colGrid)
-	}
-	drawLed(l.chkLedWhite, chequerOnWhite)
-	drawLed(l.chkLedBlack, chequerOnBlack)
-
-	// Onion-skin toggle buttons: tinted to their silhouette colour when active.
-	// Dimmed in Spectrum Colour mode, where onion skins are not shown.
-	onionActive := c.Mode() != ui.SpectrumColour
-	onionStates := []bool{c.OnionPrev(), c.OnionNext()}
-	onionTints := []rl.Color{
-		rl.NewColor(0x80, 0x20, 0x20, 0xff),
-		rl.NewColor(0x20, 0x80, 0x20, 0xff),
-	}
-	for i, b := range l.onionButtons {
-		bc := colBtn
-		if onionStates[i] {
-			bc = onionTints[i]
-		} else if b.hit(mx, my) {
-			bc = colBtnHot
-		}
-		rl.DrawRectangle(int32(b.x), int32(b.y), int32(b.w), int32(b.h), bc)
-		rl.DrawRectangleLines(int32(b.x), int32(b.y), int32(b.w), int32(b.h), colGrid)
-		lc := colText
-		if !onionActive {
-			lc = colDim
-		}
-		drawWrappedLabel(txt, b, lc)
-	}
-
-	// Editor grid, pan/zoom transformed with FRACTIONAL cell/origin so zoom is
-	// smooth (no integer snapping). Clipped to its layout box with a scissor so a
-	// panned/zoomed sprite never overdraws the surrounding UI. Each cell spans
-	// [ox+x*cell, ox+(x+1)*cell] exactly, so cells tile seamlessly at any scale.
-	sw, sh := s.Width(), s.Height()
-	gw := float32(sw) * cell
-	gh := float32(sh) * cell
-	boxX, boxY := float32(l.gridX), float32(l.gridY)
-	boxR, boxB := boxX+float32(l.gridW), boxY+float32(l.gridH)
-
-	rl.BeginScissorMode(int32(l.gridX), int32(l.gridY), int32(l.gridW), int32(l.gridH))
-
-	// Lighter backing so the grid box reads clearly even when the sprite is
-	// panned away.
-	rl.DrawRectangle(int32(l.gridX), int32(l.gridY), int32(l.gridW), int32(l.gridH), colGridArea)
-
-	mode := c.Mode()
-	for y := 0; y < sh; y++ {
-		ry0 := oy + float32(y)*cell
-		ry1 := oy + float32(y+1)*cell
-		if ry1 < boxY || ry0 > boxB {
-			continue
-		}
-		for x := 0; x < sw; x++ {
-			rx0 := ox + float32(x)*cell
-			rx1 := ox + float32(x+1)*cell
-			if rx1 < boxX || rx0 > boxR {
-				continue
-			}
-			rect := rl.NewRectangle(rx0, ry0, rx1-rx0, ry1-ry0)
-			on := s.At(x, y)
-
-			switch mode {
-			case ui.SpectrumColour:
-				// 1 -> cell ink colour, 0 -> cell paper colour.
-				attr := s.AttrAt(x, y)
-				var idx int
-				if on {
-					idx = zxpalette.Index(zxpalette.Ink(attr), zxpalette.Bright(attr))
-				} else {
-					idx = zxpalette.Index(zxpalette.Paper(attr), zxpalette.Bright(attr))
-				}
-				rl.DrawRectangleRec(rect, zxColor(zxpalette.RGBA[idx]))
-			case ui.BitmapWhite:
-				if on {
-					rl.DrawRectangleRec(rect, colInk) // white
-				} else {
-					drawCheckerPixel(rx0, ry0, rx1-rx0, ry1-ry0, x, y, ui.BitmapWhite, chequerOnWhite)
-				}
-			default: // BitmapBlack
-				if on {
-					rl.DrawRectangleRec(rect, rl.Black)
-				} else {
-					drawCheckerPixel(rx0, ry0, rx1-rx0, ry1-ry0, x, y, ui.BitmapBlack, chequerOnBlack)
-				}
-			}
-		}
-	}
-
-	// Onion skins: in the bitmap views only, overlay the previous frame's set
-	// pixels in translucent red and the next frame's in translucent green, each
-	// independently toggleable. Drawn over the current frame so the ghosts read.
-	if mode != ui.SpectrumColour {
-		drawOnion := func(f int, col rl.Color) {
-			fr := s.Frame(f)
-			if fr == nil {
-				return
-			}
-			for y := 0; y < sh; y++ {
-				ry0 := oy + float32(y)*cell
-				ry1 := oy + float32(y+1)*cell
-				if ry1 < boxY || ry0 > boxB {
-					continue
-				}
-				for x := 0; x < sw; x++ {
-					if !fr[y*sw+x] {
-						continue
-					}
-					rx0 := ox + float32(x)*cell
-					rx1 := ox + float32(x+1)*cell
-					if rx1 < boxX || rx0 > boxR {
-						continue
-					}
-					rl.DrawRectangleRec(rl.NewRectangle(rx0, ry0, rx1-rx0, ry1-ry0), col)
-				}
-			}
-		}
-		if c.OnionPrev() {
-			drawOnion(c.PrevFrameIndex(), colOnionPrev)
-		}
-		if c.OnionNext() {
-			drawOnion(c.NextFrameIndex(), colOnionNext)
-		}
-	}
-
-	// Single scale unit: zoom percentage, mapped linearly from the on-screen pixel
-	// size (ppp = device px per virtual pixel = cellF) across the fixed zoom range.
-	// The scale is window-independent (fixed base cell x persistent v.zoom, the Quag
-	// model), so this percentage means the same thing for every sprite and window:
-	//   pppMin (5px)  -> 0%      pppMax (160px) -> 800%.
-	// The readout shows this same percentage and the grid/overlay thresholds are
-	// stated in it, so what is read is exactly what drives the fades.
+func drawZenuiOverlays(txt, iconTxt *guidraw.BDFText, c *ui.Controller, l guidraw.Layout, theme guidraw.Theme, cell float32, paletteFade float32, palette *zenui.ZXClassicPaletteChooser, preview *zenui.PreviewPane, toolPalette *zenui.ToolPalette, penPanel *penOptions, penSize int, attrOnGlobal bool) {
 	ppp := cell
-	zoomPct := pppToPercent(ppp)
+	zoomPct := guiutil.PPPToPercent(ppp, pppMin, pppMax)
 
-	// In Spectrum Colour mode, overlay an almost-invisible 1px-resolution grid so
-	// individual virtual pixels are discernible. Fades in between the pixGrid
-	// thresholds (device px per virtual pixel).
-	if mode == ui.SpectrumColour {
-		if pf := pixGridFade(zoomPct); pf > 0 {
-			pc := colPixGrid
-			pc.A = uint8(float32(colPixGrid.A) * pf)
-			for x := 1; x < sw; x++ {
-				gx := ox + float32(x)*cell
-				rl.DrawRectangleRec(rl.NewRectangle(gx, oy, 1, gh), pc)
-			}
-			for y := 1; y < sh; y++ {
-				gy := oy + float32(y)*cell
-				rl.DrawRectangleRec(rl.NewRectangle(ox, gy, gw, 1), pc)
-			}
-		}
-
-		// Flat-cell overlay: when very zoomed in, mark set pixels that are visually
-		// invisible because their cell's ink and paper are the same colour (common
-		// after image import). Each such set pixel gets a thin inner stroke so the
-		// hidden pixels can be seen and edited. Full at >= 600% zoom, fading out by
-		// 400%.
-		if ff := flatCellFade(zoomPct); ff > 0 {
-			for cy := 0; cy < s.AttrRows(); cy++ {
-				for cx := 0; cx < s.AttrCols(); cx++ {
-					attr := s.AttrCell(cx, cy)
-					if zxpalette.Ink(attr) != zxpalette.Paper(attr) {
-						continue // not a flat cell — pixels are already visible
-					}
-					// Stroke each set pixel in this cell. Contrast against the cell's
-					// (single) colour using the same black/white chooser as the marks.
-					strokeC := markColour(zxpalette.Ink(attr))
-					strokeC.A = uint8(255 * ff)
-					x0 := cx * 8
-					y0 := cy * 8
-					for py := y0; py < y0+8 && py < sh; py++ {
-						for px := x0; px < x0+8 && px < sw; px++ {
-							if !s.At(px, py) {
-								continue
-							}
-							rx := ox + float32(px)*cell
-							ry := oy + float32(py)*cell
-							if rx+cell < boxX || rx > boxR || ry+cell < boxY || ry > boxB {
-								continue
-							}
-							// Thin inner stroke inset one pixel inside the pixel square.
-							rl.DrawRectangleLinesEx(rl.NewRectangle(rx+1, ry+1, cell-2, cell-2), 1, strokeC)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Character-cell guides: a dark-grey line every 8 sprite pixels. Full strength
-	// at >= 250% zoom, fading linearly to fully transparent at 80% (no guides at
-	// 80% and below).
-	if cf := cellGuideFade(zoomPct); cf > 0 {
-		gc := colGuide
-		gc.A = uint8(float32(colGuide.A) * cf)
-		for x := 8; x < sw; x += 8 {
-			rl.DrawRectangleRec(rl.NewRectangle(ox+float32(x)*cell, oy, 1, gh), gc)
-		}
-		for y := 8; y < sh; y += 8 {
-			rl.DrawRectangleRec(rl.NewRectangle(ox, oy+float32(y)*cell, gw, 1), gc)
-		}
-	}
-	// Outer border around the sprite (always drawn, at full strength).
-	rl.DrawRectangleLinesEx(rl.NewRectangle(ox, oy, gw, gh), 1, colGuide)
-
-	rl.EndScissorMode()
-
-	// Medium-grey border around the viewport box itself, drawn outside the
-	// scissor so it is never clipped and stays fixed regardless of pan/zoom.
-	rl.DrawRectangleLinesEx(rl.NewRectangle(float32(l.gridX), float32(l.gridY),
-		float32(l.gridW), float32(l.gridH)), 1, colVPBorder)
-
-	// Drawer-toggle triangle just below the viewport's bottom border: points up
-	// when the drawer is closed (click to open), down when open (click to close).
-	drawDrawerTriangle(l, mx, my)
-
-	// Detail preview (fixed-size box, top-right) plus the press-and-hold full
-	// preview popup. Rendered by drawPreview using the current mode's colours.
-	drawPreview(c, l, focusX, focusY, previewZoom)
 	// Just above the preview pane (2px gap): the preview pane's own scale factor
 	// (right-aligned) and the editor viewport's zoom as a percentage (left-aligned)
 	// on the fixed 5px=0% .. 160px=800% scale — the same value that drives the
 	// grid/overlay fades, so the number read matches their behaviour regardless of
 	// sprite size or window size.
-	labelY := l.previewY - 2 - txt.CellH()
-	txt.Draw("X"+itoa(previewZoom), l.previewX+l.previewW-20, labelY, 1, colDim)
-	txt.Draw(itoa(int(zoomPct+0.5))+"%", l.previewX, labelY, 1, colDim)
+	labelY := l.PreviewY - 2 - txt.CellH()
+	txt.Draw("X"+guiutil.Itoa(preview.Zoom()), l.PreviewX+l.PreviewW-20, labelY, 1, theme.Dim)
+	txt.Draw(guiutil.Itoa(int(zoomPct+0.5))+"%", l.PreviewX, labelY, 1, theme.Dim)
 
-	// Attribute palette (Spectrum Colour mode): 8 swatches, left-click sets ink,
-	// right-click sets paper; a bright toggle beneath. The current ink and paper
-	// selections are marked. It fades in/out on mode change (paletteFade), so it
-	// keeps drawing during the fade-out even after the mode has switched away.
+	// Tool palette, tucked between the preview box and the attribute palette.
+	// Always visible (unlike the attribute palette, tool choice isn't mode-
+	// specific), so no fade-alpha handling is needed here. Drawn through a
+	// Renderer over iconTxt (the icon face), not the regular txt — the same
+	// fpRenderer adapter, just wrapping a different BDFText instance.
+	txt.Draw("TOOLS", l.ToolPaletteX, l.ToolPaletteY-12, 1, theme.Text)
+	toolPalette.Draw(fpRenderer{txt: iconTxt}, fpTheme())
+
+	// Brush size badge: a small digit in the paintbrush button's top-left
+	// corner, shown only when the selected size is bigger than the default
+	// (1) — nothing to indicate otherwise, since size 1 needs no reminder.
+	// Drawn directly on the button's own background, with no backing patch
+	// behind it — the same approach the attribute palette uses for its I/P
+	// ink/paper indicators, rather than a solid rectangle that reads as a
+	// censorship bar over the icon underneath.
+	if penSize > 1 {
+		if btnRect, ok := toolPalette.RectFor("paintbrush"); ok {
+			txt.Draw(guiutil.Itoa(penSize), btnRect.X+2, btnRect.Y+1, 1, theme.Text)
+		}
+	}
+
+	// Pen options panel moved below, after preview.Draw — see that call's
+	// own comment for why: two things both claimed to be "drawn last", and
+	// since preview.Draw ran second, it was silently painting over this
+	// panel every frame once the panel started living above the toolpalette
+	// (overlapping the preview box's own screen area). Found via direct
+	// pixel dumps showing a uniform, undisturbed background colour where
+	// the panel's buttons should have been — not a position or logic bug,
+	// a draw-order bug.
+
+	// Attribute palette (Spectrum Colour mode): owned by a
+	// zenui.ZXClassicPaletteChooser now. It fades in/out on mode change
+	// (paletteFade, passed through as Draw's alpha), so it keeps drawing
+	// during the fade-out even after the mode has switched away.
 	if paletteFade > 0 {
 		pa := uint8(255 * paletteFade)
-		fadeC := func(c rl.Color) rl.Color { c.A = uint8(float32(c.A) * paletteFade); return c }
-		tc := colText
+		tc := theme.Text
 		tc.A = pa
-		txt.Draw("PALETTE", l.paletteX, l.paletteY-12, 1, tc)
-		gc := colGrid
-		gc.A = pa
-		for i := 0; i < 16; i++ {
-			r := l.swatchRects[i]
-			base := l.swatchBase[i]
-			bright := l.swatchBright[i]
-			rl.DrawRectangleRec(r, fadeC(zxColor(zxpalette.Colour(base, bright))))
-			rl.DrawRectangleLinesEx(r, 1, gc)
-			// Mark the swatch matching the current ink / paper selection.
-			if base == c.Ink() && bright == c.Bright() {
-				mc := markColour(base)
-				mc.A = pa
-				txt.Draw("I", int(r.X)+3, int(r.Y)+3, 1, mc)
-			}
-			if base == c.Paper() && bright == c.Bright() {
-				mc := markColour(base)
-				mc.A = pa
-				txt.Draw("P", int(r.X)+int(r.Width)-10, int(r.Y)+3, 1, mc)
-			}
+		txt.Draw("PALETTE", l.PaletteX, l.PaletteY-12, 1, tc)
+		palette.Draw(fpRenderer{txt: txt}, fpTheme(), c.Ink(), c.Paper(), c.Bright(), paletteFade)
+	}
+
+	// Global ATTR ON/OFF indicator: always shown, right-aligned above the
+	// palette column — reverse video (light fill, dark text) when the
+	// Ctrl-double-tap toggle is active, plain normal-video text when it
+	// isn't. Drawn independent of paletteFade — the underlying attribute
+	// data (and so the toggle's effect) exists regardless of which view
+	// mode is currently displayed, not just Spectrum Colour. Also acts as
+	// a click target (see the main loop's click handling), so its rect is
+	// computed by the same attrOnIndicatorRect helper used there.
+	{
+		label := attrOnLabel(attrOnGlobal)
+		r := attrOnIndicatorRect(l, txt, attrOnGlobal)
+		if attrOnGlobal {
+			rl.DrawRectangle(int32(r.X), int32(r.Y), int32(r.W), int32(r.H), theme.Text)
+			txt.Draw(label, r.X+2, r.Y+1, 1, theme.BG)
+		} else {
+			txt.Draw(label, r.X+2, r.Y+1, 1, theme.Text)
 		}
 	}
 
-	// Buttons.
-	// Strip buttons fade in/out as the window resize changes whether they fit
-	// beside the viewport. The opacity is animated over time (btnOpacity), so the
-	// transition plays fully even when a resize is reported as one completed step.
-	for i, b := range l.buttons {
-		af := float32(1)
-		if i < len(btnOpacity) {
-			af = btnOpacity[i]
-		}
-		if af <= 0 {
-			continue // fully faded: skip drawing entirely
-		}
-		a := uint8(255 * af)
-		bc := colBtn
-		if b.hit(mx, my) {
-			bc = colBtnHot
-		}
-		bc.A = a
-		gc := colGrid
-		gc.A = a
-		tc := colText
-		tc.A = a
-		rl.DrawRectangle(int32(b.x), int32(b.y), int32(b.w), int32(b.h), bc)
-		rl.DrawRectangleLines(int32(b.x), int32(b.y), int32(b.w), int32(b.h), gc)
-		drawButtonLabelColour(txt, upper(b.label), b.x, b.y, b.w, b.h, tc)
-	}
+	// Detail preview box (fixed-size, top-right) and its press-and-hold popup.
+	preview.Draw(fpRenderer{txt: txt}, l.WinW, l.WinH, fpTheme())
 
-	// Press-and-hold full-preview popup, drawn last so it overlays everything.
-	drawPreviewPopup(c, l, popup, focusX, focusY, previewZoom)
+	// Pen options panel, drawn genuinely last so it can't be painted over by
+	// anything else in this function, including the preview box above.
+	if penPanel != nil {
+		penPanel.Draw(fpRenderer{txt: txt}, fpTheme())
+	}
 }
 
 // markColour returns a high-contrast text colour for marking a palette swatch:
 // black on bright/light colours (yellow, cyan, white, green), white otherwise.
-func markColour(colour int) rl.Color {
-	switch colour {
-	case zxpalette.Yellow, zxpalette.Cyan, zxpalette.White, zxpalette.Green:
-		return rl.Black
-	default:
-		return colInk
-	}
-}
-
-// pixelColour returns the display colour of sprite pixel (x,y) in the current
-// view mode. The second result is false for "transparent" pixels (clear pixels
-// in the bitmap modes), which the caller renders as the chequer.
-func pixelColour(c *ui.Controller, x, y int) (rl.Color, bool) {
-	s := c.Sprite
-	on := s.At(x, y)
-	switch c.Mode() {
-	case ui.SpectrumColour:
-		attr := s.AttrAt(x, y)
-		idx := zxpalette.Paper(attr)
-		if on {
-			idx = zxpalette.Ink(attr)
-		}
-		return zxColor(zxpalette.RGBA[zxpalette.Index(idx, zxpalette.Bright(attr))]), true
-	case ui.BitmapWhite:
-		if on {
-			return colInk, true
-		}
-	default: // BitmapBlack
-		if on {
-			return rl.Black, true
-		}
-	}
-	return rl.Color{}, false
-}
-
-// drawSpriteRegion renders a rectangular region of the sprite [cx0,cx0+span) x
-// [cy0,cy0+span) into the screen box (bx,by,bw,bh), scaling to fill. Clear
-// pixels in the bitmap modes show the transparency chequer; out-of-range cells
-// are left as the box backing.
-func drawSpriteRegion(c *ui.Controller, cx0, cy0, spanX, spanY int, bx, by, bw, bh float32) {
-	s := c.Sprite
-	pw := bw / float32(spanX)
-	ph := bh / float32(spanY)
-	for j := 0; j < spanY; j++ {
-		sy := cy0 + j
-		if sy < 0 || sy >= s.Height() {
-			continue
-		}
-		for i := 0; i < spanX; i++ {
-			sx := cx0 + i
-			if sx < 0 || sx >= s.Width() {
-				continue
-			}
-			rx := bx + float32(i)*pw
-			ry := by + float32(j)*ph
-			if col, draw := pixelColour(c, sx, sy); draw {
-				rl.DrawRectangleRec(rl.NewRectangle(rx, ry, pw+0.5, ph+0.5), col)
-			} else {
-				drawCheckerPixel(rx, ry, pw+0.5, ph+0.5, sx, sy, c.Mode(), chequerVisibleFor(c.Mode()))
-			}
-		}
-	}
-}
-
-// drawPreview renders the fixed-size detail preview at a fixed integer zoom
-// (each sprite pixel is a zoom*zoom screen square; the visible span is
-// previewBox/zoom pixels, centred on the focus and clamped within the sprite).
-// previewRegion computes what the detail preview shows: the sprite region
-// [rcx,rcy] sized [rspanX,rspanY], drawn at 'zoom' px per sprite pixel and placed
-// at screen [rox,roy] with size [rdrawW,rdrawH] (centred in the box when smaller
-// than it). It is shared by drawPreview and the collapsed end of the popup
-// animation so the two match exactly.
-func previewRegion(sw, sh, boxW, boxH, zoom, focusX, focusY int, pvX, pvY float32) (rcx, rcy, rspanX, rspanY int, rox, roy, rdrawW, rdrawH float32) {
-	if zoom < 1 {
-		zoom = 1
-	}
-	spanX := boxW / zoom
-	spanY := boxH / zoom
-	if spanX > sw {
-		spanX = sw
-	}
-	if spanY > sh {
-		spanY = sh
-	}
-	if spanX < 1 {
-		spanX = 1
-	}
-	if spanY < 1 {
-		spanY = 1
-	}
-	cx0 := focusX - spanX/2
-	cy0 := focusY - spanY/2
-	if cx0 < 0 {
-		cx0 = 0
-	}
-	if cy0 < 0 {
-		cy0 = 0
-	}
-	if cx0+spanX > sw {
-		cx0 = sw - spanX
-	}
-	if cy0+spanY > sh {
-		cy0 = sh - spanY
-	}
-	drawW := float32(spanX * zoom)
-	drawH := float32(spanY * zoom)
-	offX := pvX
-	offY := pvY
-	if drawW < float32(boxW) {
-		offX += (float32(boxW) - drawW) / 2
-	}
-	if drawH < float32(boxH) {
-		offY += (float32(boxH) - drawH) / 2
-	}
-	return cx0, cy0, spanX, spanY, offX, offY, drawW, drawH
-}
-
-func drawPreview(c *ui.Controller, l layout, focusX, focusY, zoom int) {
-	s := c.Sprite
-	pvX, pvY := float32(l.previewX), float32(l.previewY)
-	pvW, pvH := float32(l.previewW), float32(l.previewH)
-
-	// Box backing.
-	rl.DrawRectangleRec(rl.NewRectangle(pvX, pvY, pvW, pvH), colGridArea)
-
-	cx0, cy0, spanX, spanY, offX, offY, drawW, drawH :=
-		previewRegion(s.Width(), s.Height(), l.previewW, l.previewH, zoom, focusX, focusY, pvX, pvY)
-
-	rl.BeginScissorMode(int32(pvX), int32(pvY), int32(pvW), int32(pvH))
-	drawSpriteRegion(c, cx0, cy0, spanX, spanY, offX, offY, drawW, drawH)
-	rl.EndScissorMode()
-
-	rl.DrawRectangleLinesEx(rl.NewRectangle(pvX, pvY, pvW, pvH), 1, colGrid)
-}
-
-// drawPreviewPopup renders the press-and-hold full-sprite overlay and its
-// grow/shrink animation. The expanded state (t=1) is a large view of the whole
-// frame anchored to the preview's top-right corner. The retraction does NOT
-// scale the sprite down (which would distort/re-fit it); instead the sprite is
-// drawn at an interpolated scale while the visible window is clipped, so the
-// image is progressively clipped and, at t=0, lands on exactly the region and
-// scale the preview pane shows — a seamless match. focusX/focusY and previewZoom
-// are the same values drawPreview uses, so the collapsed end aligns pixel-for-
-// pixel with the preview.
-func drawPreviewPopup(c *ui.Controller, l layout, popup float32, focusX, focusY, previewZoom int) {
-	if popup <= 0 {
-		return
-	}
-	s := c.Sprite
-	sw, sh := s.Width(), s.Height()
-	pvX, pvY := float32(l.previewX), float32(l.previewY)
-	pvW, pvH := float32(l.previewW), float32(l.previewH)
-	anchorR := pvX + pvW // right edge stays fixed (top-right anchor)
-	anchorT := pvY       // top edge stays fixed
-
-	t := easeInOut(popup)
-	scrW := float32(rl.GetScreenWidth())
-	scrH := float32(rl.GetScreenHeight())
-
-	// --- Expanded end (t=1): whole sprite fills the popup box. ---
-	availW := anchorR - float32(pad)
-	availH := scrH - float32(pad) - anchorT
-	maxW := availW
-	if maxW > scrW*0.75 {
-		maxW = scrW * 0.75
-	}
-	maxH := availH
-	if maxH > scrH*0.85 {
-		maxH = scrH * 0.85
-	}
-	aspect := float32(sw) / float32(sh)
-	tgtW := maxW
-	tgtH := tgtW / aspect
-	if tgtH > maxH {
-		tgtH = maxH
-		tgtW = tgtH * aspect
-	}
-	// Expanded box, anchored top-right; whole sprite drawn to fill it.
-	boxW1, boxH1 := tgtW, tgtH
-	boxX1 := anchorR - boxW1
-	boxY1 := anchorT
-	scale1 := tgtW / float32(sw) // screen px per sprite px, expanded
-	originX1 := boxX1            // sprite pixel (0,0) screen position
-	originY1 := boxY1
-
-	// --- Collapsed end (t=0): match the preview pane exactly. ---
-	zoom := previewZoom
-	if zoom < 1 {
-		zoom = 1
-	}
-	cx0, cy0, _, _, offX, offY, _, _ :=
-		previewRegion(sw, sh, l.previewW, l.previewH, zoom, focusX, focusY, pvX, pvY)
-	// Collapsed box is the preview rect; sprite drawn at 'zoom' px/pixel, with
-	// pixel (0,0) at this screen origin so region [cx0,cy0] lands at [offX,offY].
-	boxW0, boxH0 := pvW, pvH
-	boxX0, boxY0 := pvX, pvY
-	scale0 := float32(zoom)
-	originX0 := offX - float32(cx0)*scale0
-	originY0 := offY - float32(cy0)*scale0
-
-	// --- Interpolate box, scale and sprite origin between the two ends. ---
-	lerp := func(a, b float32) float32 { return a + (b-a)*t }
-	boxX := lerp(boxX0, boxX1)
-	boxY := lerp(boxY0, boxY1)
-	boxW := lerp(boxW0, boxW1)
-	boxH := lerp(boxH0, boxH1)
-	scale := lerp(scale0, scale1)
-	originX := lerp(originX0, originX1)
-	originY := lerp(originY0, originY1)
-
-	// Backdrop dim scales with the animation.
-	rl.DrawRectangle(0, 0, int32(scrW), int32(scrH), rl.NewColor(0, 0, 0, uint8(150*t)))
-
-	// Box backing, then the sprite drawn at the interpolated scale/origin, CLIPPED
-	// to the box. Because scale tracks the box only through the shared endpoints,
-	// the sprite is clipped (not squashed) as the box shrinks, and at t=0 the
-	// visible window equals the preview's content exactly.
-	rl.DrawRectangleRec(rl.NewRectangle(boxX, boxY, boxW, boxH), colGridArea)
-	rl.BeginScissorMode(int32(boxX), int32(boxY), int32(boxW), int32(boxH))
-	drawSpriteRegion(c, 0, 0, sw, sh, originX, originY, float32(sw)*scale, float32(sh)*scale)
-	rl.EndScissorMode()
-	rl.DrawRectangleLinesEx(rl.NewRectangle(boxX, boxY, boxW, boxH), 2, colGuide)
-}
-
-// easeInOut is a smoothstep ease for the popup animation.
-func easeInOut(t float32) float32 {
-	if t < 0 {
-		t = 0
-	}
-	if t > 1 {
-		t = 1
-	}
-	return t * t * (3 - 2*t)
-}
-
-// drawCheckerPixel fills one virtual-pixel cell with a single transparency
-// chequer square, alternating light/dark by pixel parity. One square per virtual
-// pixel means an 8x8 character cell shows an 8x8 chequer. The chequer shade is
-// nudged per view mode for contrast against the set-pixel colour: two notches
-// darker in Bitmap White (so white pixels stand out against a dimmer chequer)
-// and two notches lighter in Bitmap Black (so black pixels stand out against a
-// brighter chequer). When chequerOn is false the whole area is a solid shade
-// instead of a pattern (see chequerOffColour).
-func drawCheckerPixel(x, y, w, h float32, px, py int, mode ui.ViewMode, chequerOn bool) {
-	if !chequerOn {
-		rl.DrawRectangleRec(rl.NewRectangle(x, y, w, h), chequerOffColour(mode))
-		return
-	}
-	c := colChkLight
-	if (px+py)%2 == 1 {
-		c = colChkDark
-	}
-	c = shadeChequer(c, mode)
-	rl.DrawRectangleRec(rl.NewRectangle(x, y, w, h), c)
-}
-
-// chequerOffColour is the solid fill used for the empty area when the chequer is
-// toggled off. In Bitmap Black mode it takes the lightest chequer shade for that
-// mode; in Bitmap White mode the darkest. This keeps the empty area distinct from
-// the set-pixel colour (black pixels on a light field / white pixels on a dark
-// field) without the busy chequer pattern.
-func chequerOffColour(mode ui.ViewMode) rl.Color {
-	switch mode {
-	case ui.BitmapBlack:
-		return shadeChequer(colChkLight, ui.BitmapBlack) // lightest for this bitmap
-	default: // BitmapWhite
-		return shadeChequer(colChkDark, ui.BitmapWhite) // darkest for this bitmap
-	}
-}
-
-// chequerVisibleFor reports whether the transparency chequer is currently on for
-// the given bitmap mode, per the LED toggles. The main loop keeps these in sync
-// each frame; they are read from the preview drawing path, which does not thread
-// the per-frame UI state through its signature.
-var (
-	chequerOnWhite = true
-	chequerOnBlack = true
-)
-
 // resetRequested is set by the RESET button and consumed by the main loop, which
 // then opens the typed confirmation modal. Package-level for the same reason as
-// the chequer state: the button-action closures are built in computeLayout and
-// cannot reach per-loop state.
+// the chequer state used to be: the button-action closures are built in
+// computeLayout and cannot reach per-loop state.
 var resetRequested bool
 
-func chequerVisibleFor(mode ui.ViewMode) bool {
-	if mode == ui.BitmapBlack {
-		return chequerOnBlack
-	}
-	return chequerOnWhite
-}
-
-// chequerNotch is one shade step; two notches = 2*chequerNotch.
-const chequerNotch = 0x14
-
-// shadeChequer nudges a chequer grey per view mode.
-func shadeChequer(c rl.Color, mode ui.ViewMode) rl.Color {
-	var d int
-	switch mode {
-	case ui.BitmapWhite:
-		d = -2 * chequerNotch // darker
-	case ui.BitmapBlack:
-		d = +2 * chequerNotch // lighter
-	default:
-		return c
-	}
-	adj := func(v uint8) uint8 {
-		n := int(v) + d
-		if n < 0 {
-			n = 0
-		}
-		if n > 255 {
-			n = 255
-		}
-		return uint8(n)
-	}
-	return rl.NewColor(adj(c.R), adj(c.G), adj(c.B), c.A)
-}
-
 // --- tiny string helpers (the Sinclair face is uppercase-friendly) ----------
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var buf [12]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
-
-func upper(s string) string {
-	b := []byte(s)
-	for i, ch := range b {
-		if ch >= 'a' && ch <= 'z' {
-			b[i] = ch - 32
-		}
-	}
-	return string(b)
-}
-
-// drawButtonLabel centres a label inside a button. If the label is too wide for
-// the button at scale 1, it is split at a space into two centred lines so it
-// stays legible when the button has shrunk in a narrow window. Labels with no
-// space are drawn on one line (clipped by the button if truly too small).
-// buttonVisible reports whether a strip button should be shown: true while its
-// right border is within the viewport's right edge, false once it extends past.
-// The actual on-screen fade is animated over time (see the button-opacity easing
-// in the main loop), so this is a clean target rather than a gradual value — that
-// way the fade animates fully even on platforms that report a resize only once it
-// has finished, rather than as a continuous stream.
-func buttonVisible(bx, bw, vpRight int) bool {
-	return bx+bw <= vpRight
-}
-
-func drawButtonLabel(txt *bdfText, label string, bx, by, bw, bh int) {
-	drawButtonLabelColour(txt, label, bx, by, bw, bh, colText)
-}
-
-// drawButtonLabelColour is drawButtonLabel with an explicit text colour, so the
-// caller can fade the label (e.g. a button sliding past the viewport edge).
-func drawButtonLabelColour(txt *bdfText, label string, bx, by, bw, bh int, col rl.Color) {
-	lineH := txt.CellH()
-	pad := 6
-	if txt.Measure(label, 1) <= bw-2*pad {
-		// Fits on one line: centre it.
-		lw := txt.Measure(label, 1)
-		txt.Draw(label, bx+(bw-lw)/2, by+(bh-lineH)/2, 1, col)
-		return
-	}
-	// Split at the last space that keeps the first line within the button, else
-	// the first space.
-	split := -1
-	for i := 0; i < len(label); i++ {
-		if label[i] == ' ' {
-			if txt.Measure(label[:i], 1) <= bw-2*pad {
-				split = i
-			} else if split == -1 {
-				split = i
-			}
-		}
-	}
-	if split < 0 {
-		// No space to break on: one line, centred (may clip).
-		lw := txt.Measure(label, 1)
-		txt.Draw(label, bx+(bw-lw)/2, by+(bh-lineH)/2, 1, col)
-		return
-	}
-	l1 := label[:split]
-	l2 := label[split+1:]
-	gap := 1
-	totalH := 2*lineH + gap
-	y0 := by + (bh-totalH)/2
-	w1 := txt.Measure(l1, 1)
-	w2 := txt.Measure(l2, 1)
-	txt.Draw(l1, bx+(bw-w1)/2, y0, 1, col)
-	txt.Draw(l2, bx+(bw-w2)/2, y0+lineH+gap, 1, col)
-}
-
-// fadeRamp is a linear 0..1 ramp: 0 at or below lo, 1 at or above hi, linear
-// between. Used by the grid/overlay fades, which are all keyed off the on-screen
-// size of one virtual pixel (in device pixels) rather than a zoom ratio — that
-// size is the true, invariant determinant of legibility, independent of window
-// size, sprite dimensions, or the fitted base cell.
-func fadeRamp(v, lo, hi float32) float32 {
-	if hi <= lo {
-		if v >= hi {
-			return 1
-		}
-		return 0
-	}
-	f := (v - lo) / (hi - lo)
-	if f < 0 {
-		return 0
-	}
-	if f > 1 {
-		return 1
-	}
-	return f
-}
-
-// pppToPercent maps the on-screen pixel size to a zoom percentage on the
-// screen-relative scale (pppMin -> 0%, pppMax -> 800%, linear). pppMin/pppMax are
-// set from the monitor height at startup, so 0% means the tallest sprite fits the
-// screen height. This is the one unit shown in the readout and used for the fades.
-func pppToPercent(ppp float32) float32 {
-	if pppMax <= pppMin {
-		return 0
-	}
-	return (ppp - pppMin) / (pppMax - pppMin) * 800
-}
-
-// The grid/overlay visibility thresholds, in zoom percentage on the fixed
-// 5px=0% .. 160px=800% scale — the same value shown in the readout. Because the
-// scale is window-independent, these behave identically for every sprite size and
-// window size and can be read/tuned directly against the readout.
-// Recalculated for the widened zoom range (0% floor lowered to 0.8x fit-to-screen):
-// these percentages keep each grid/overlay at the same physical pixel size it had
-// under the previous range (guides 15-80, pixgrid 20-150, same-attr 150-400).
-const (
-	cellGuideFadeLo, cellGuideFadeHi = 37, 100  // character-cell guide lines
-	pixGridFadeLo, pixGridFadeHi     = 42, 168  // Spectrum 1px grid
-	flatCellFadeLo, flatCellFadeHi   = 168, 411 // flat-cell (same ink/paper) overlay
-)
-
-// cellGuideFade returns the opacity (0..1) for the character-cell guide lines at
-// the given zoom percentage.
-func cellGuideFade(pct float32) float32 {
-	return fadeRamp(pct, cellGuideFadeLo, cellGuideFadeHi)
-}
-
-// pixGridFade returns the opacity (0..1) for the Spectrum-mode 1px grid at the
-// given zoom percentage.
-func pixGridFade(pct float32) float32 {
-	return fadeRamp(pct, pixGridFadeLo, pixGridFadeHi)
-}
-
-// flatCellFade returns the opacity (0..1) for the flat-cell set-pixel overlay at
-// the given zoom percentage. Only shows when very zoomed in.
-func flatCellFade(pct float32) float32 {
-	return fadeRamp(pct, flatCellFadeLo, flatCellFadeHi)
-}
-
-// truncateLabel shortens s to at most max characters, appending "..." when it is
-// longer. Counts runes so multibyte names are not cut mid-character.
-func truncateLabel(s string, max int) string {
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	return string(r[:max]) + "..."
-}
-
-// forEachLinePixel walks the integer pixels of the line from (x0,y0) to (x1,y1)
-// inclusive using Bresenham's algorithm, calling fn for each. It fills the gaps
-// left when the pointer moves faster than one pixel per frame, so a fast stroke
-// draws a continuous line rather than sparse dots.
-func forEachLinePixel(x0, y0, x1, y1 int, fn func(x, y int)) {
-	dx := x1 - x0
-	if dx < 0 {
-		dx = -dx
-	}
-	dy := y1 - y0
-	if dy < 0 {
-		dy = -dy
-	}
-	sx := 1
-	if x0 > x1 {
-		sx = -1
-	}
-	sy := 1
-	if y0 > y1 {
-		sy = -1
-	}
-	err := dx - dy
-	for {
-		fn(x0, y0)
-		if x0 == x1 && y0 == y1 {
-			return
-		}
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x0 += sx
-		}
-		if e2 < dx {
-			err += dx
-			y0 += sy
-		}
-	}
-}
-
-// drawDrawerTriangle draws the small toggle triangle below the viewport: it
-// points down while the drawer is open (click to close) and up while closed
-// (click to open), following the eased drawerOpen progress.
-func drawDrawerTriangle(l layout, mx, my int) {
-	r := l.drawerToggle
-	// Subtle backing so the triangle reads over any sprite content beneath it.
-	pad2 := float32(3)
-	bg := rl.NewRectangle(r.X-pad2, r.Y-pad2, r.Width+2*pad2, r.Height+2*pad2)
-	rl.DrawRectangleRec(bg, rl.NewColor(0x10, 0x10, 0x18, 0xb0))
-	col := colVPBorder
-	if rectHit(r, mx, my) {
-		col = colText
-	}
-	cx := r.X + r.Width/2
-	open := l.drawerOpen >= 0.5
-	if open {
-		// Pointing down: apex at the bottom centre.
-		rl.DrawTriangle(
-			rl.NewVector2(r.X, r.Y),
-			rl.NewVector2(cx, r.Y+r.Height),
-			rl.NewVector2(r.X+r.Width, r.Y),
-			col)
-	} else {
-		// Pointing up: apex at the top centre.
-		rl.DrawTriangle(
-			rl.NewVector2(r.X, r.Y+r.Height),
-			rl.NewVector2(r.X+r.Width, r.Y+r.Height),
-			rl.NewVector2(cx, r.Y),
-			col)
-	}
-}
-
-// drawWrappedLabel renders a button label on up to two lines, splitting at the
-// first space, with each line horizontally centred and the block vertically
-// centred in the button. Used only for the narrow mode/onion strip.
-func drawWrappedLabel(txt *bdfText, b button, tint rl.Color) {
-	label := upper(b.label)
-	line1, line2 := label, ""
-	if i := indexByte(label, ' '); i >= 0 {
-		line1, line2 = label[:i], label[i+1:]
-	}
-	lineH := txt.CellH()
-	totalH := lineH
-	if line2 != "" {
-		totalH = lineH*2 + 2
-	}
-	y0 := b.y + (b.h-totalH)/2
-	cx := func(s string) int { return b.x + (b.w-txt.Measure(s, 1))/2 }
-	txt.Draw(line1, cx(line1), y0, 1, tint)
-	if line2 != "" {
-		txt.Draw(line2, cx(line2), y0+lineH+2, 1, tint)
-	}
-}
-
-// indexByte returns the index of the first occurrence of c in s, or -1.
-const (
-	axisNone = 0
-	axisH    = 1
-	axisV    = 2
-)
-
-// lockAxis applies Shift axis-lock: given the stroke anchor, the raw cursor
-// pixel, and the current locked axis (axisNone until decided), it returns the
-// constrained pixel and the (possibly newly decided) axis. The axis is chosen on
-// the first move away from the anchor by the dominant direction and then held.
-func lockAxis(anchorX, anchorY, px, py, axis int) (int, int, int) {
-	if axis == axisNone {
-		dx := px - anchorX
-		dy := py - anchorY
-		if dx != 0 || dy != 0 {
-			if abs(dx) >= abs(dy) {
-				axis = axisH
-			} else {
-				axis = axisV
-			}
-		}
-	}
-	switch axis {
-	case axisH:
-		py = anchorY
-	case axisV:
-		px = anchorX
-	}
-	return px, py, axis
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
-}

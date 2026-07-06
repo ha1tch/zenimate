@@ -61,7 +61,7 @@ func TestBundleAddEncodeReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kn.FrameCount() != 4 || !kn.Frame(0)[1] {
+	if kn.FrameCount() != 4 || !kn.Frame(0).At(1, 0, 24) {
 		t.Error("knight animation did not round-trip through the bundle")
 	}
 }

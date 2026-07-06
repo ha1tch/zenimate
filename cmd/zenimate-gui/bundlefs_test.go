@@ -106,7 +106,7 @@ func TestOpenBundleEntryLoads(t *testing.T) {
 	if c.Sprite.Width() != 24 || c.Sprite.Height() != 16 {
 		t.Fatalf("opened wrong animation: %dx%d", c.Sprite.Width(), c.Sprite.Height())
 	}
-	if !c.Sprite.Frame(0)[2*24+2] {
+	if !c.Sprite.Frame(0).At(2, 2, 24) {
 		t.Error("knight pixel (2,2) missing after bundle open")
 	}
 }

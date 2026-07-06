@@ -3,6 +3,122 @@
 All notable changes to zenimate are documented here.
 The format follows Keep a Changelog; versions follow semantic versioning.
 
+## [0.7.0]
+
+A full tool palette replacing the always-on paintbrush: selection (with
+Photoshop-style move/duplicate/copy/paste and clipping), five shape tools,
+flood fill, a multi-line text tool, and pen shape/size options — plus a
+round of bug fixes surfaced by building all of it.
+
+### Added
+- Global ATTR ON/OFF toggle: releasing Ctrl twice in quick succession flips
+  a persistent, tool-independent mode. Always shown above the palette
+  column, right-aligned — "ATTR ON" in reverse video when active, "ATTR
+  OFF" in normal video when not — and clickable itself as an alternative to
+  the Ctrl gesture. Separate from the existing per-stroke Ctrl-held
+  attribute-paint gesture — this stays on until toggled again, regardless
+  of which tool is active.
+- Double-clicking the hand tool re-fits the whole sprite to the viewport —
+  the same manual "return to fit" gesture Photoshop uses for its hand tool,
+  and the only way back to a fitted view once you've zoomed away from one
+  (the existing fit animation otherwise only ever ran once, automatically,
+  on a sprite resize).
+- Tool palette with twelve tools: paintbrush, select, fill, eyedropper, line,
+  rectangle, ellipse, triangle, polygon, text, hand, zoom. Paintbrush is
+  first (and the default tool on startup), matching the single-tool
+  behaviour from before the palette existed.
+- Selection tool: rectangular marquee with move, Alt-duplicate, copy/paste
+  (a separate clipboard from the existing whole-frame copy/paste), and
+  flip/rotate that operates on just the selected region when one is active.
+  Floating (uncommitted) content renders as a live preview with a marching-
+  ants border; `Enter`/`Escape` confirm or cancel a pending move exactly as
+  in Photoshop. Modifiers match Photoshop: Ctrl or Alt force a move/duplicate
+  of the existing selection even when the drag starts outside its bounds;
+  Alt-drag when defining a brand new selection grows it from the centre
+  outward. A plain click (no drag) on empty space, with something already
+  selected, deselects rather than creating a meaningless 1x1 selection.
+- Selection clipping: every drawing tool except text now clips its output to
+  the active selection, matching Photoshop. Text is a deliberate exception.
+- Pen shape/size options panel, opened by right-clicking the paintbrush
+  button: round, square, and a custom (X-shaped) brush, sizes 1-4. Shape
+  buttons show a filled preview of the actual stamp pattern each shape
+  produces, not a borrowed icon. A small badge appears on the paintbrush
+  button itself when size is bigger than 1.
+- Shape tools: line, rectangle, triangle, ellipse, and a regular polygon (3-9
+  sides, adjustable with the number keys mid-drag), each with a live preview
+  while dragging. The ellipse defaults to drawing from its centre; holding
+  Alt switches to the conventional corner-to-corner behaviour.
+- Flood fill tool (4-connected).
+- Text tool: click to place, type to enter multi-line text (Enter inserts a
+  newline), a rendered cursor, and arrow-key navigation — including "sticky
+  column" up/down movement, so moving up and back down returns to the same
+  horizontal position rather than a fixed character index. Commits on
+  clicking elsewhere, switching tools, or any other action (play, save,
+  flip, invert, frame navigation, and so on).
+- Ctrl held while painting with the brush, fill, or any shape tool stamps
+  the current ink/paper attribute instead of the bitmap, matching the
+  brush's existing Ctrl gesture.
+- Four additional built-in fonts for the text tool — TomThumb, Spleen5x8,
+  Creep, and HaxorMedium — chosen for being genuinely usable at ZX Spectrum
+  sprite scale rather than just more sizes of the same monospace family.
+- Font picker for the text tool: right-click the text tool button to choose
+  among all six built-in fonts (Sinclair, Cozette, and the four above); the
+  currently active one is marked when the menu is reopened.
+
+### Changed
+- Text tool now respects existing per-cell attributes by default: committing
+  text only touches the bitmap, leaving whatever ink/paper was already
+  there unchanged. Ctrl held when the entry starts, or the global ATTR ON
+  toggle, stamps the current ink/paper onto the touched cells instead —
+  matching the same Ctrl-attribute-paint convention already used by the
+  brush, fill, and shape tools, captured once at the start of the entry
+  rather than re-checked at commit time.
+- Preview pane's left edge now aligns with the tool palette/attribute
+  palette column instead of sitting slightly further left.
+- Delete-frame button removed; the add-frame button now occupies its place.
+
+### Fixed
+- The Reset confirmation dialog's "type YES" box didn't accept any typed
+  input (Esc still worked to cancel). Same root cause as the earlier text
+  tool fix: it called rl.GetCharPressed() directly, but the main loop's
+  shared per-frame input snapshot already drains that same queue first, so
+  the dialog was always reading an already-emptied queue. Fixed by taking
+  the shared input like everything else does.
+- The text tool stopped capturing typed input entirely: committing pending
+  text before any button action (added to make sure play/save/flip/frame
+  navigation always saw finished text) didn't exclude clicks on the canvas
+  itself, so the same click that started a new text entry immediately
+  committed and cleared it again before any typing could register.
+- Typed characters were frequently lost because `fpInput()` was called
+  multiple times per frame; its underlying character queue is destructively
+  drained on read, so only the first caller in a frame ever saw them. This
+  was the root cause of the text tool appearing not to respond to typing.
+- Pressing Enter to confirm a text entry or a selection move also toggled
+  animation playback, because the global keyboard handler re-read floating/
+  active state later in the same frame, after the confirm action had already
+  changed it. Fixed by capturing the relevant state once, at the top of the
+  frame, before anything can mutate it.
+- Preview pane and its popup intermittently showed gridline-like artefacts:
+  each sampled pixel was drawn with a fixed width that didn't reliably touch
+  its neighbour whenever the box size didn't divide evenly by the image
+  size, leaving sub-pixel gaps the background showed through. Fixed by
+  deriving each pixel's rect from consecutive rounded boundaries.
+- Committing a moved or pasted selection did a full overwrite of the
+  destination instead of an OR-merge, unlike Photoshop, where a selection's
+  unset areas are transparent and don't erase what's underneath on drop.
+- Transparency chequer in Bitmap White/Black modes now fades out between
+  40% and 10% zoom, disappearing to a solid background at 10% and below,
+  instead of staying at full contrast regardless of zoom level.
+- The pen options panel's buttons floated with no containing background,
+  showing whatever was underneath through the gaps between them. Fixed by
+  drawing a solid containing rectangle behind both rows first — using the
+  app's darker background tone rather than the theme's own "Panel" colour,
+  which in this app's theme mapping is identical to the button colour and
+  so produced no visible contrast.
+- The pen options panel had its clicks stolen by the preview pane once it
+  was repositioned above the tool palette and began overlapping the preview
+  box's own screen area.
+
 ## [0.6.1]
 
 A right-click context menu and drag-to-reorder for the frame strip, built on a

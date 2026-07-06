@@ -33,10 +33,10 @@ func spriteFromScreen(screen *scr.Screen) *Sprite {
 		attrRows: h / Cell,
 		selected: 0,
 	}
-	fr := make(Frame, w*h)
+	fr := newFrame(w, h)
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			fr[y*w+x] = screen.Ink[y][x]
+			fr.Set(x, y, w, screen.Ink[y][x])
 		}
 	}
 	s.frames = []Frame{fr}

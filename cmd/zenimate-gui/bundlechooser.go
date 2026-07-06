@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/zenui"
 )
@@ -52,7 +53,7 @@ func newBundleChooser(c *ui.Controller, path, name, label string, exists bool) *
 	}
 	items := make([]zenui.Item, len(options))
 	for i, o := range options {
-		items[i] = zenui.Item{Label: upper(o.label)}
+		items[i] = zenui.Item{Label: guiutil.Upper(o.label)}
 	}
 	title := "NEW BUNDLE"
 	if exists {
@@ -67,7 +68,7 @@ func newBundleChooser(c *ui.Controller, path, name, label string, exists bool) *
 		options: options,
 		panel: zenui.NewOptionPanel(zenui.OptionPanelConfig{
 			Title:    title,
-			Subtitle: upper("add \"" + name + "\" to this bundle"),
+			Subtitle: guiutil.Upper("add \"" + name + "\" to this bundle"),
 			Options:  items,
 		}),
 	}

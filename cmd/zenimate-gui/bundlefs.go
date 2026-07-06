@@ -90,7 +90,7 @@ func spriteThumbnail(s *model.Sprite, f int) *zenui.EntryPreview {
 			paper := int((attr >> 3) & 0x07)
 			bright := attr&0x40 != 0
 			idx := paper
-			if fr[y*w+x] {
+			if fr.At(x, y, w) {
 				idx = ink
 			}
 			col := zxpalette.Colour(idx, bright)

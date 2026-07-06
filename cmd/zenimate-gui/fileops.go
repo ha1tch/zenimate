@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ha1tch/zenimate/cmd/zenimate-gui/internal/guiutil"
 	"github.com/ha1tch/zenimate/internal/model"
 	"github.com/ha1tch/zenimate/internal/ui"
 	"github.com/ha1tch/zenimate/pkg/zenui"
@@ -344,7 +345,7 @@ func (f *fileOps) startSaveExport(c *ui.Controller, format model.ExportFormat) {
 	ext := model.ExportExt(format)
 	f.open(zenui.DialogConfig{
 		Mode:       zenui.ModeSave,
-		Title:      "Export " + upper(ext),
+		Title:      "Export " + guiutil.Upper(ext),
 		Filters:    []string{ext},
 		DefaultExt: ext,
 	}, func(path string) {
